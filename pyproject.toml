@@ -1,0 +1,36 @@
+[tool.poetry]
+name = "datar-polars"
+version = "0.0.0"
+description = "Polars backend for datar"
+authors = ["pwwang <pwwang@pwwang.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "datar_polars"}]
+
+[tool.poetry.dependencies]
+python = "^3.7.1"
+polars = "^0.13"
+datar = "^0.10.3"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.2"
+pytest-cov = "^4"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.plugins.datar]
+polars = "datar_polars:plugin"
+
+[tool.pytest.ini_options]
+addopts = "-vv --assert=plain -p no:asyncio -p no:xdist --tb=short --cov-config=.coveragerc --cov=datar_polars --cov-report xml:cov.xml --cov-report term-missing"
+# addopts = "-vv --assert=plain -p no:asyncio --tb=short -n 0"
+filterwarnings = [
+    # "ignore::UserWarning",
+    # "ignore::RuntimeWarning",
+    "ignore",
+    # "error"
+]
+console_output_style = "progress"
+junit_family = "xunit1"
