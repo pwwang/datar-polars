@@ -11,44 +11,17 @@ from pipda import evaluate_expr, ReferenceAttr, ReferenceItem
 from datar.core.utils import arg_match
 from datar.dplyr import mutate, transmute, relocate
 
-from polars import DataFrame, LazyFrame, NotFoundError
+from polars import DataFrame, NotFoundError
 
 from ...contexts import Context
 from ...collections import Collection
 from ...utils import (
     name_of,
-    to_expr,
     setdiff,
     union,
     intersect,
 )
 from ...tibble import Tibble, add_to_tibble
-
-
-@mutate.register(LazyFrame, context=Context.EVAL_EXPR, backend="polars")
-def _mutate_lazy(
-    _data: LazyFrame,
-    *args,
-    _keep: str = None,
-    _before: int | str = None,
-    _after: int | str = None,
-    **kwargs,
-):
-    if _keep is not None:
-        raise ValueError(
-            "Cannot use `_keep` with a lazy frame, "
-            "consider collect the result first"
-        )
-
-    if _before is not None or _after is not None:
-        raise ValueError(
-            "Cannot use `_before` or `_after` with a lazy frame, "
-            "consider collect the result first"
-        )
-
-    cols = [to_expr(arg) for arg in args]
-    cols.extend(to_expr(v, k) for k, v in kwargs.items())
-    return _data.with_columns(cols)
 
 
 @mutate.register(DataFrame, context=Context.PENDING, backend="polars")
@@ -63,7 +36,7 @@ def _mutate(
     keep = arg_match(_keep, "_keep", ["all", "unused", "used", "none"])
     # so we can attach metadata
     data = Tibble(_data)
-    data._datar["used_refs"] = set()
+    data.datar.meta["used_refs"] = set()
     all_columns = data.columns
 
     mutated_cols = []
@@ -102,7 +75,7 @@ def _mutate(
                 mutated_cols.append(key)
 
     # names start with "_" are temporary names if they are used
-    used_refs = data._datar["used_refs"]
+    used_refs = data.datar.meta["used_refs"]
     tmp_cols = [
         mcol
         for mcol in mutated_cols
@@ -143,27 +116,8 @@ def _mutate(
     data = data.select(keep)
 
     # used for group_by
-    data._datar["mutated_cols"] = mutated_cols
+    data.datar.meta["mutated_cols"] = mutated_cols
     return data
-
-
-@transmute.register(LazyFrame, context=Context.EVAL_EXPR, backend="polars")
-def _transmute_lazy(
-    _data,
-    *args,
-    _before=None,
-    _after=None,
-    **kwargs,
-):
-    if _before is not None or _after is not None:
-        raise ValueError(
-            "Cannot use `_before` or `_after` with a lazy frame, "
-            "consider collect the result first"
-        )
-
-    cols = [to_expr(arg) for arg in args]
-    cols.extend(to_expr(v, k) for k, v in kwargs.items())
-    return _data.with_columns(cols).select(setdiff(_data.columns, list(kwargs)))
 
 
 @transmute.register(DataFrame, context=Context.PENDING, backend="polars")

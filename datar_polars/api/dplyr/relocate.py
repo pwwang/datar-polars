@@ -8,6 +8,7 @@ from polars import DataFrame, col
 
 from ...contexts import Context
 from ...utils import setdiff, union
+from ...tibble import TibbleGrouped, TibbleRowwise
 from .select import _eval_select  # pyright: ignore
 
 
@@ -42,6 +43,7 @@ def _relocate(
         if where not in to_move:
             to_move.append(where)
 
+    where = int(where)
     lhs = setdiff(range(where), to_move)
     rhs = setdiff(range(where + 1, len(all_columns)), to_move)
     pos = union(lhs, union(to_move, rhs))
@@ -55,3 +57,43 @@ def _relocate(
             cols.append(selected_col)
 
     return _data.select(cols)
+
+
+@relocate.register(TibbleGrouped, context=Context.SELECT, backend="polars")
+def _relocate_grouped(
+    _data: TibbleGrouped,
+    *args: Any,
+    _before: int | str = None,
+    _after: int | str = None,
+    **kwargs: Any,
+) -> TibbleGrouped:
+
+    out = relocate.dispatch(DataFrame, backend="polars")(
+        _data,
+        *args,
+        _before=_before,
+        _after=_after,
+        **kwargs,
+    )
+
+    return out.datar.group_by(*_data.datar.grouper._group_vars)
+
+
+@relocate.register(TibbleRowwise, context=Context.SELECT, backend="polars")
+def _relocate_rowwise(
+    _data: TibbleRowwise,
+    *args: Any,
+    _before: int | str = None,
+    _after: int | str = None,
+    **kwargs: Any,
+) -> TibbleRowwise:
+
+    out = relocate.dispatch(DataFrame, backend="polars")(
+        _data,
+        *args,
+        _before=_before,
+        _after=_after,
+        **kwargs,
+    )
+
+    return out.datar.rowwise(*_data.datar.grouper._group_vars)

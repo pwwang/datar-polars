@@ -8,26 +8,26 @@ from typing import Any, Iterable, List, Mapping, Sequence, Tuple
 from datar.apis.dplyr import select
 from datar.core.utils import logger
 
-from polars import DataFrame, LazyFrame, col
-from polars.internals.dataframe.groupby import GroupBy
+from polars import DataFrame, col
 
 from ...contexts import Context
-from ...utils import vars_select, intersect, setdiff, union
+from ...utils import vars_select, setdiff, union
 from ...collections import Collection, Inverted
+from ...tibble import TibbleGrouped, TibbleRowwise
 
 
 @select.register(
-    GroupBy,
+    (TibbleGrouped, TibbleRowwise),
     context=Context.SELECT,
     backend="polars",
 )
 def _select_gb(
-    _data: GroupBy,
+    _data: TibbleGrouped | TibbleRowwise,
     *args: str | Iterable | Inverted,
     **kwargs: Mapping[str, str],
-) -> GroupBy:
-    old_gvars = _data.by
-    ungrouped = _data.apply(lambda x: x)
+) -> TibbleGrouped | TibbleRowwise:
+    old_gvars = _data.datar.grouper.group_vars
+    ungrouped = _data.datar.grouper.df
     all_columns = ungrouped.columns
     selected_idx, new_names = _eval_select(
         all_columns,
@@ -36,25 +36,28 @@ def _select_gb(
         _group_vars=old_gvars,
     )
     cols = []
-    new_gvars = []
     for i in selected_idx:
         selected_col = all_columns[int(i)]
         if new_names and selected_col in new_names:
             cols.append(col(selected_col).alias(new_names[selected_col]))
-            new_gvars.append(new_names[selected_col])
         else:
             cols.append(selected_col)
-            new_gvars.append(selected_col)
+
+    new_gvars = [
+        new_names.get(gvar, gvar)
+        if new_names
+        else gvar
+        for gvar in old_gvars
+    ]
     data = ungrouped.select(cols)
-    gvars = intersect(union(old_gvars, new_gvars), data.columns)
-    return data.groupby(gvars)
+
+    if isinstance(_data, TibbleRowwise):
+        return data.datar.rowwise(new_gvars)
+
+    return data.datar.group_by(*new_gvars)
 
 
-@select.register(
-    (DataFrame, LazyFrame),
-    context=Context.SELECT,
-    backend="polars",
-)
+@select.register(DataFrame, context=Context.SELECT, backend="polars")
 def _select(
     _data: DataFrame,
     *args: str | Iterable | Inverted,

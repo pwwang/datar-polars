@@ -4,18 +4,18 @@ import numpy as np
 
 from datar import options
 # from datar.core import plugin  # noqa: F401
+options(
+    import_names_conflict="silent",
+    backends=["numpy", "polars"],
+)
 
 
 # def pytest_addoption(parser):
 #     parser.addoption("--modin", action="store_true")
 
 
-def pytest_sessionstart(session):
-    options(
-        import_names_conflict="silent",
-        backends=["numpy", "polars"],
-    )
-    # set_seed(8888)
+# def pytest_sessionstart(session):
+#     set_seed(8888)
 
 
 SENTINEL = 85258525.85258525

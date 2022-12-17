@@ -1,11 +1,7 @@
 from typing import TYPE_CHECKING, Mapping
 
-from simplug import Simplug
-
 from polars import read_csv, DataFrame
-
-plugin = Simplug("datar")
-
+from datar.core.plugin import plugin
 
 # @plugin.impl
 # def setup():
@@ -27,40 +23,37 @@ def load_dataset(name: str, metadata: Mapping) -> DataFrame:
     return read_csv(meta.source)
 
 
-# @plugin.impl
-# def base_api():
-#     from .api.base import (
-#         arithm,
-#         asis,
-#         bessel,
-#         complex,
-#         cum,
-#         factor,
-#         funs,
-#         null,
-#         random,
-#         seq,
-#         special,
-#         string,
-#         table,
-#         trig,
-#         verbs,
-#         which,
-#     )
-#     from .api.base.asis import as_pd_date
-
-#     return {"as_pd_date": as_pd_date}
+@plugin.impl
+def base_api():
+    from .api.base import (
+        arithm,
+        # asis,
+        # bessel,
+        # complex,
+        # cum,
+        # factor,
+        # funs,
+        # null,
+        # random,
+        seq,
+        # special,
+        # string,
+        # table,
+        # trig,
+        verbs,
+        # which,
+    )
 
 
 @plugin.impl
 def dplyr_api():
     from .api.dplyr import (
         # across,
-        # arrange,
+        arrange,
         # bind,
         # context,
         # count_tally,
-        # desc,
+        desc,
         # distinct,
         # filter_,
         # funs,
@@ -82,8 +75,8 @@ def dplyr_api():
         select,
         # sets,
         # slice_,
-        # summarise,
-        # tidyselect,
+        summarise,
+        tidyselect,
     )
 
 
@@ -126,24 +119,14 @@ def tibble_api():
 #     )
 
 
-# @plugin.impl
-# def other_api():
-#     from .api.other import (
-#         itemgetter,
-#         attrgetter,
-#         pd_cat,
-#         pd_dt,
-#         pd_str,
-#         flatten,
-#     )
-#     return {
-#         "itemgetter": itemgetter,
-#         "attrgetter": attrgetter,
-#         "pd_cat": pd_cat,
-#         "pd_dt": pd_dt,
-#         "pd_str": pd_str,
-#         "flatten": flatten,
-#     }
+@plugin.impl
+def misc_api():
+    from .api.misc import flatten, lazy, collect
+    return {
+        "lazy": lazy,
+        "collect": collect,
+        "flatten": flatten,
+    }
 
 
 @plugin.impl
@@ -159,13 +142,13 @@ def get_versions():
     return out
 
 
-# @plugin.impl
-# def c_getitem(item):
-#     from .collections import Collection
-#     return Collection(item)
+@plugin.impl
+def c_getitem(item):
+    from .collections import Collection
+    return Collection(item)
 
 
-# @plugin.impl
-# def operate(op, x, y=None):
-#     from .operators import operate as operate_
-#     return operate_(op, x, y)
+@plugin.impl
+def operate(op, x, y=None):
+    from .operators import operate as operate_
+    return operate_(op, x, y)

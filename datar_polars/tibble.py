@@ -1,76 +1,100 @@
 from __future__ import annotations
 
-from copy import copy
-from functools import singledispatch
+from functools import singledispatch, wraps
 from itertools import chain
 from typing import Any, Callable, Mapping, Sequence
 
-from polars import DataFrame, LazyFrame, DataType, Series, lit, all as pl_all
+from polars import DataFrame, DataType, Series, lit, all as pl_all
+from polars.exceptions import NotFoundError
 from pipda import evaluate_expr
 from datar.core.names import repair_names
 
 from .collections import Collection
-from .utils import name_of, is_scalar
+from .utils import name_of, to_expr, is_scalar
 
 
-class LazyTibble(LazyFrame):
-    @classmethod
-    @property
-    def _dataframe_class(cls):
-        return Tibble
+# class LazyTibble(LazyFrame):
+#     @classmethod
+#     @property
+#     def _dataframe_class(cls):
+#         return Tibble
 
 
-class LazyTibbleRowwise(LazyFrame):
-    @classmethod
-    @property
-    def _dataframe_class(cls):
-        return TibbleRowwise
+# class LazyTibbleGrouped(LazyFrame):
+#     @classmethod
+#     @property
+#     def _dataframe_class(cls):
+#         return TibbleGrouped
+
+
+# class LazyTibbleRowwise(LazyFrame):
+#     @classmethod
+#     @property
+#     def _dataframe_class(cls):
+#         return TibbleRowwise
+
+def _keep_ns(method: Callable) -> Callable:
+    """Decorator to keep the namespace of the method"""
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        out = method(self, *args, **kwargs)
+        # method() may turn self back to DataFrame
+        out = self.__class__(out)
+        out.datar.update_from(self)
+        return out
+
+    return wrapper
 
 
 class Tibble(DataFrame):
-    _lazyframe_class = LazyTibble
-    # metadata
-    _datar = {}
+    # Not working with polars 0.15
+    # _lazyframe_class = LazyTibble
 
-    def __init__(self, data=None, columns=None, orient=None, *, meta=None):
-        if meta is None and isinstance(data, Tibble):
-            meta = data._datar
-
-        self._datar.update(meta or {})
+    def __init__(self, data=None, columns=None, orient=None):
         if isinstance(data, DataFrame):
             self._df = data._df
+            self.datar.update_from(data)
             return
 
         super().__init__(data, columns, orient)
 
     def copy(self, copy_meta=True):
         """Copy the tibble"""
-        out = copy(self)
-        if copy_meta:
-            out._datar = self._datar.copy()
+        out = self.clone()
+        out.datar.update_from(self)
         return out
 
-    def select(self, exprs) -> Tibble:
-        out = super().select(exprs)
-        return Tibble(out)
-
-    def with_columns(self, exprs, **named_exprs) -> Tibble:
-        out = super().with_columns(exprs, **named_exprs)
-        return Tibble(out)
-
-    def with_column(self, column) -> Tibble:
-        out = super().with_column(column)
-        return Tibble(out)
+    select = _keep_ns(DataFrame.select)
+    drop = _keep_ns(DataFrame.drop)
+    filter = _keep_ns(DataFrame.filter)
+    rename = _keep_ns(DataFrame.rename)
+    sort = _keep_ns(DataFrame.sort)
+    with_column = _keep_ns(DataFrame.with_column)
+    with_columns = _keep_ns(DataFrame.with_columns)
 
     def __setitem__(self, key, value: Any) -> None:
+        # allow df['a'] = 1
         if isinstance(key, str):
-            if is_scalar(value):
-                value = lit(value).alias(key)
-            else:
-                value = Series(name=key, values=value)
+            value = to_expr(value, name=key)
             self._df = self.with_column(value)._df
             return
         return super().__setitem__(key, value)
+
+    def __getitem__(self, key):
+        try:
+            result = super().__getitem__(key)
+        except NotFoundError:
+            subdf_cols = [
+                col for col in self.columns if col.startswith(f"{key}$")
+            ]
+            if not subdf_cols:
+                raise
+
+            result = self.select(subdf_cols)
+            result.columns = [col[len(key) + 1:] for col in subdf_cols]
+
+        return result
 
     @classmethod
     def from_pairs(
@@ -91,7 +115,6 @@ class Tibble(DataFrame):
             _name_repair: How to repair names
             _dtypes: The dtypes for post conversion
         """
-        # from .collections import Collection
         from .contexts import Context
 
         if len(names) != len(values):
@@ -142,8 +165,32 @@ class Tibble(DataFrame):
         )
 
 
+class TibbleGrouped(Tibble):
+
+    def __str__(self) -> str:
+        return f"{self.datar.grouper.str_()}\n{super().__str__()}"
+
+    def _repr_html_(self) -> str:
+        html = super()._repr_html_()
+        return html.replace(
+            '<table border="1" class="dataframe">\n',
+            '<table border="1" class="dataframe">\n'
+            f'<small>{self.datar.grouper.html()}</small>\n<br />\n',
+        )
+
+
 class TibbleRowwise(Tibble):
-    _lazyframe_class = LazyTibbleRowwise
+
+    def __str__(self) -> str:
+        return f"{self.datar.grouper.str_()}\n{super().__str__()}"
+
+    def _repr_html_(self) -> str:
+        html = super()._repr_html_()
+        return html.replace(
+            '<table border="1" class="dataframe">\n',
+            '<table border="1" class="dataframe">\n'
+            f'<small>{self.datar.grouper.html()}</small>\n<br />\n',
+        )
 
 
 @singledispatch
@@ -165,10 +212,11 @@ def _init_tibble_from_series(
 ) -> Tibble:
     # Deprecate warning, None will be used as series name in the future
     # So use 0 as default here
-    name = name or value.name or "0"
+    if name:
+        value = value.alias(name)
     if dtype:
         value = value.cast(dtype)
-    return Tibble(value.to_frame(), columns=[name])
+    return Tibble(value.to_frame())
 
 
 @init_tibble_from.register(DataFrame)
@@ -187,7 +235,7 @@ def _init_tibble_frame_df(
 def _init_tibble_frame_tibble(
     value: Tibble, name: str, dtype: DataType
 ) -> Tibble:
-    out = value.__class__(value, meta=value._datar)
+    out = value.copy()
     if name:
         out.columns = [f"{name}${col}" for col in out.columns]
     return out
@@ -216,11 +264,19 @@ def add_to_tibble(
 
         return tbl
 
+    if isinstance(value, DataFrame) and value.shape[1] == 0:
+        value = None
+
     if is_scalar(value):
         val = lit(value)
         if dtype:
             val = val.cast(dtype)
         return tbl.with_columns(val.alias(name))
+
+    if isinstance(value, DataFrame):
+        for col in value.columns:
+            tbl = add_to_tibble(tbl, f"{name}${col}", value[col], dtype=dtype)
+        return tbl
 
     # dtype=int not working on float
     # val = Series(name=name, values=value, dtype=dtype)
@@ -250,11 +306,11 @@ def broadcast_base(
 
     name = name or name_of(value) or str(value)
     # The length should be [1, len(value)]
-    if base.shape[0] == len(value):
+    if len(value) in (0, base.shape[0]):
         return base
 
     if base.shape[0] == 1:
-        return base.sample(n=len(value), with_replacement=True)
+        return base[[0] * len(value), :]
 
     # Let polars handle the error
     return base

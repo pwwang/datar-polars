@@ -1,5 +1,7 @@
 import pytest
 
+from pipda import Context, evaluate_expr
+from datar import f
 from datar_polars.collections import Collection, Intersect, Inverted, Slice
 
 from ..conftest import assert_iterable_equal
@@ -240,3 +242,9 @@ def test_intersect():
     right = Collection("b", 2, 3, pool=list("abcd"))
     ins = Intersect(left, right).expand()
     assert list(ins) == [1, 2]
+
+
+def test_pipda_eval():
+    c = Collection(f["a"], f["b"])
+    out = evaluate_expr(c, {"a": [1, 2], "b": [2]}, context=Context.EVAL)
+    assert_iterable_equal(out, [1, 2, 2])

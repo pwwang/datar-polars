@@ -5,11 +5,12 @@ from typing import Any, Sequence
 from functools import singledispatch
 
 import numpy as np
-from polars import Series, Expr, lit
+from polars import DataFrame, Series, Expr, lit
 from pipda import Expression, evaluate_expr
 from pipda.context import ContextType
 from datar.apis.base import (
     is_integer as _is_integer,
+    is_logical as _is_logical,
     intersect as _intersect,
     setdiff as _setdiff,
     union as _union,
@@ -88,6 +89,10 @@ def is_integer(x: Any) -> bool:
     return _is_integer(x, __ast_fallback="normal", __backend="numpy")
 
 
+def is_logical(x: Any) -> bool:
+    return _is_logical(x, __ast_fallback="normal", __backend="numpy")
+
+
 def unique(x: Any) -> np.ndarray:
     return _unique(x, __ast_fallback="normal", __backend="numpy")
 
@@ -125,3 +130,13 @@ def name_of(x):
 @name_of.register(Series)
 def _name_of_series(x):
     return x.name
+
+
+@name_of.register(DataFrame)
+def _name_of_df(x):
+    return None
+
+
+@name_of.register(Expr)
+def _name_of_expr(x):
+    return x.meta.output_name()

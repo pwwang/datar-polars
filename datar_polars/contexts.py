@@ -2,6 +2,7 @@
 from enum import Enum
 
 from polars import DataFrame, col
+from polars.internals.dataframe.groupby import GroupBy
 from pipda.context import (
     ContextBase,
     ContextEval as ContextEvalPipda,
@@ -25,7 +26,7 @@ class ContextEvalExpr(ContextEvalPipda):
     def getitem(self, parent, ref, level):
         """Interpret f[ref]"""
         if isinstance(ref, str):
-            if isinstance(parent, DataFrame):
+            if isinstance(parent, (GroupBy, DataFrame)):
                 self._save_used_ref(parent, ref, level)
                 return col(ref)
             if isinstance(parent, TibbleRowwise):
@@ -37,7 +38,7 @@ class ContextEvalExpr(ContextEvalPipda):
     def getattr(self, parent, ref, level):
         """Evaluate f.a"""
         if isinstance(ref, str):
-            if isinstance(parent, DataFrame):
+            if isinstance(parent, (GroupBy, DataFrame)):
                 self._save_used_ref(parent, ref, level)
                 return col(ref)
             if isinstance(parent, TibbleRowwise):
@@ -60,6 +61,11 @@ class ContextEvalExpr(ContextEvalPipda):
 
 class ContextEvalData(ContextEvalPipda):
     """Evaluation context to evaluate pipda expressions into real data"""
+
+    def getattr(self, parent, ref, level):
+        """Evaluate f.a"""
+        if isinstance(ref, str) and isinstance(parent, (dict, DataFrame)):
+            return parent[ref]
 
     @property
     def ref(self) -> ContextBase:

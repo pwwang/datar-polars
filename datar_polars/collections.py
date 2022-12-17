@@ -40,7 +40,7 @@ class CollectionBase(ABC):
         """Defines how the object should be evaluated when evaluated by
         pipda's evaluation"""
         self.elems = evaluate_expr(self.elems, data, context)
-        return self
+        return self.expand()
 
     @abstractmethod
     def expand(self, pool: int | Iterable = None) -> CollectionBase:

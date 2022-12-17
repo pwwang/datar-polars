@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 
-from polars import DataFrame, LazyFrame
+from polars import DataFrame
 from pipda import Expression, evaluate_expr, ReferenceAttr, ReferenceItem
 from datar.apis.tibble import (
     tibble,
@@ -72,7 +72,7 @@ def _tibble(
     for key, val in kwargs.items():
         if isinstance(val, Expression):
             try:
-                evaluate_expr(val, eval_data, Context.EVAL)
+                evaluate_expr(val, eval_data, Context.EVAL_DATA)
             except (KeyError, NotImplementedError):
                 evaled_kws[key] = val
             else:
@@ -209,11 +209,6 @@ def _tibble_row(
 )
 def _as_tibble_df(df: DataFrame | dict) -> Tibble:
     return Tibble(df)
-
-
-@as_tibble.register(LazyFrame, backend="polars")
-def _as_tibble_lazy(df: DataFrame | dict) -> Tibble:
-    return Tibble(df.collect())
 
 
 @as_tibble.register(Tibble, context=Context.EVAL_DATA, backend="polars")
