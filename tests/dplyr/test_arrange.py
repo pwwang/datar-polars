@@ -92,21 +92,21 @@ def test_update_grouping():
     assert_iterable_equal(out[1], [1, 3])
 
 
-# def test_across():
-#     df = tibble(x=[1, 3, 2, 1], y=[4, 3, 2, 1])
+def test_across():
+    df = tibble(x=[1, 3, 2, 1], y=[4, 3, 2, 1])
 
-#     out = df >> arrange(across())
-#     expect = df >> arrange(f.x, f.y)
-#     assert out.equals(expect)
+    out = df >> arrange(across())
+    expect = df >> arrange(f.x, f.y)
+    assert out.frame_equal(expect)
 
-#     out = df >> arrange(across(None, desc))
-#     expect = df >> arrange(desc(f.x), desc(f.y))
-#     assert out.equals(expect)
+    out = df >> arrange(across(None, desc))
+    expect = df >> arrange(desc(f.x), desc(f.y))
+    assert_frame_equal(out, expect)
 
-#     out = df >> arrange(across(f.x))
-#     expect = df >> arrange(f.x)
-#     assert out.equals(expect)
+    out = df >> arrange(across(f.x))
+    expect = df >> arrange(f.x)
+    assert out.frame_equal(expect)
 
-#     out = df >> arrange(across(f.y))
-#     expect = df >> arrange(f.y)
-#     assert out.equals(expect)
+    out = df >> arrange(across(f.y))
+    expect = df >> arrange(f.y)
+    assert out.frame_equal(expect)

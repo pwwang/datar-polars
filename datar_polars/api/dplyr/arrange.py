@@ -33,11 +33,14 @@ def _arrange(
         else _data.datar.grouper.group_vars
     )
     sorting_df = mutate(
-        data,
+        _data,
         *args,
         __ast_fallback="normal",
         __backend="polars",
         **kwargs,
+    )
+    sorting_df = sorting_df.with_column(
+        Series(range(_data.shape[0])).alias("__arrange_id__")
     )
     if _by_group:
         sorting_cols = union(gvars, sorting_df.datar.meta["mutated_cols"])

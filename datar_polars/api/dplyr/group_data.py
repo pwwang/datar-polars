@@ -16,7 +16,7 @@ from polars import DataFrame
 # from ...utils import dict_get
 from ...contexts import Context
 from ...extended import DFGrouper
-from ...tibble import Tibble
+from ...tibble import Tibble, TibbleGrouped, TibbleRowwise
 
 
 @group_data.register(DataFrame, context=Context.EVAL_EXPR, backend="polars")
@@ -24,7 +24,11 @@ def _group_data(_data: DataFrame) -> None:
     return DFGrouper(_data).group_data
 
 
-@group_data.register(Tibble, context=Context.EVAL_EXPR, backend="polars")
+@group_data.register(
+    (TibbleGrouped, TibbleRowwise),
+    context=Context.EVAL_EXPR,
+    backend="polars",
+)
 def _group_data_grouped(_data: Tibble) -> Tibble:
     return _data.datar.grouper.group_data
 
@@ -34,7 +38,11 @@ def _group_keys(_data: DataFrame) -> None:
     return DFGrouper(_data).group_keys
 
 
-@group_keys.register(Tibble, context=Context.EVAL_EXPR, backend="polars")
+@group_keys.register(
+    (TibbleGrouped, TibbleRowwise),
+    context=Context.EVAL_EXPR,
+    backend="polars",
+)
 def _group_keys_grouped(_data: Tibble) -> Tibble:
     return _data.datar.grouper.group_keys
 
@@ -44,7 +52,11 @@ def _group_rows(_data: DataFrame) -> List[List[int]]:
     return DFGrouper(_data).group_rows
 
 
-@group_rows.register(Tibble, context=Context.EVAL_EXPR, backend="polars")
+@group_rows.register(
+    (TibbleGrouped, TibbleRowwise),
+    context=Context.EVAL_EXPR,
+    backend="polars",
+)
 def _group_rows_grouped(_data: Tibble) -> List[List[int]]:
     return _data.datar.grouper.group_rows
 
@@ -54,7 +66,11 @@ def _group_indices(_data: DataFrame) -> List[int]:
     return DFGrouper(_data).group_indices
 
 
-@group_indices.register(Tibble, context=Context.EVAL_EXPR, backend="polars")
+@group_indices.register(
+    (TibbleGrouped, TibbleRowwise),
+    context=Context.EVAL_EXPR,
+    backend="polars",
+)
 def _group_indices_gruoped(_data: Tibble) -> List[int]:
     return _data.datar.grouper.group_indices
 
@@ -64,7 +80,11 @@ def _group_vars(_data: DataFrame) -> Sequence[str]:
     return []
 
 
-@group_vars.register(Tibble, context=Context.EVAL_EXPR, backend="polars")
+@group_vars.register(
+    (TibbleGrouped, TibbleRowwise),
+    context=Context.EVAL_EXPR,
+    backend="polars",
+)
 def _group_vars_gb(_data: Tibble) -> Sequence[str]:
     return _data.datar.grouper.group_vars
 
@@ -75,7 +95,11 @@ def _group_size(_data: DataFrame) -> Sequence[int]:
     return DFGrouper(_data).group_size
 
 
-@group_size.register(Tibble, context=Context.EVAL_EXPR, backend="polars")
+@group_size.register(
+    (TibbleGrouped, TibbleRowwise),
+    context=Context.EVAL_EXPR,
+    backend="polars",
+)
 def _group_size_grouped(_data: Tibble) -> Sequence[int]:
     return _data.datar.grouper.group_size
 
@@ -86,6 +110,10 @@ def _n_groups(_data: DataFrame) -> int:
     return 1
 
 
-@n_groups.register(Tibble, context=Context.EVAL_EXPR, backend="polars")
+@n_groups.register(
+    (TibbleGrouped, TibbleRowwise),
+    context=Context.EVAL_EXPR,
+    backend="polars",
+)
 def _n_groups_grouped(_data: Tibble) -> int:
     return _data.datar.grouper.n_groups

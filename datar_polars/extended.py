@@ -325,7 +325,6 @@ class ExprDatarNamespace:
     def __init__(self, expr: pl.Expr):
         self._expr = expr
         self._is_rowwise = False
-        self._is_desc = False
 
     @property
     def is_rowwise(self) -> pl.Expr:
@@ -334,14 +333,6 @@ class ExprDatarNamespace:
     @is_rowwise.setter
     def is_rowwise(self, value: bool):
         self._is_rowwise = value
-
-    @property
-    def is_desc(self) -> pl.Expr:
-        return self._is_desc
-
-    @is_desc.setter
-    def is_desc(self, value: bool):
-        self._is_desc = value
 
 
 @pl.api.register_dataframe_namespace("datar")

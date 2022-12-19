@@ -101,13 +101,9 @@ def test_rfgrouper():
 def test_expr_namespace():
     expr = pl.col("x")
     assert not expr.datar.is_rowwise
-    assert not expr.datar.is_desc
 
     expr.datar.is_rowwise = True
     assert expr.datar.is_rowwise
-
-    expr.datar.is_desc = True
-    assert expr.datar.is_desc
 
 
 def test_dataframe_namespace():

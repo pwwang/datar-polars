@@ -48,7 +48,7 @@ def base_api():
 @plugin.impl
 def dplyr_api():
     from .api.dplyr import (
-        # across,
+        across,
         arrange,
         # bind,
         # context,
