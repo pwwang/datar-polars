@@ -14,13 +14,13 @@ class Grouper(ABC):
         "_df",
         "_gf",
         "_sort",
-        "_group_data",
-        "_group_keys",
-        "_group_indices",
-        "_group_rows",
-        "_group_size",
-        "_n_groups",
-        "_group_vars",
+        "_data",
+        "_keys",
+        "_indices",
+        "_rows",
+        "_size",
+        "_n",
+        "_vars",
     ]
 
     def __init__(
@@ -29,13 +29,13 @@ class Grouper(ABC):
         by: List[str] = None,
         sort: bool = True,
     ):
-        self._group_data = None
-        self._group_keys = None
-        self._group_indices = None
-        self._group_rows = None
-        self._group_size = None
-        self._group_vars = by
-        self._n_groups = None
+        self._data = None
+        self._keys = None
+        self._indices = None
+        self._rows = None
+        self._size = None
+        self._vars = by
+        self._n = None
         self._df = df
         self._gf = None
         self._sort = sort
@@ -49,36 +49,53 @@ class Grouper(ABC):
         """Get the grouped frame"""
 
     @property
-    def group_vars(self) -> List[str]:
-        return self._group_vars or []
+    def vars(self) -> List[str]:
+        return self._vars or []
 
     @property
     def sort(self) -> bool:
         return self._sort
 
     @abstractproperty
-    def group_data(self) -> pl.DataFrame:
+    def data(self) -> pl.DataFrame:
         """A data frame with groupvar columns and _rows as group row indexes"""
 
     @abstractproperty
-    def group_rows(self) -> np.ndarray:
+    def rows(self) -> np.ndarray:
         """The row indexes in each group"""
 
     @abstractproperty
-    def group_keys(self) -> pl.DataFrame:
+    def keys(self) -> pl.DataFrame:
         """A subset of the dataframe, with the groupvar columns only"""
 
     @abstractproperty
-    def group_indices(self) -> np.ndarray:
+    def indices(self) -> np.ndarray:
         """Use indices to mark the group of each row"""
 
     @abstractproperty
-    def group_size(self) -> np.ndarray:
+    def size(self) -> np.ndarray:
         """Get the sizes of each group"""
 
     @abstractproperty
-    def n_groups(self) -> int:
+    def n(self) -> int:
         """Get the number of groups"""
+
+    def compatible_with(self, other: Grouper) -> bool:
+        """Check if two groupers are compatible"""
+        if self is other:
+            return True
+
+        if self.vars != other.vars:
+            return False
+
+        if self.keys.unique().frame_equal(self.keys.unique()):
+            return False
+
+        return (
+            (self.size == 1)
+            | (other.size == 1)
+            | (self.size == other.size)
+        ).all()
 
     def str_(self) -> str:
         """Get the string representation"""
@@ -103,7 +120,7 @@ class GFGrouper(Grouper):
                 raise ValueError("Cannot specify `by` when `df` is a GroupBy")
             self._df = None
             self._gf = df
-            self._group_vars = df.by
+            self._vars = df.by
         else:
             self._df = df
 
@@ -117,68 +134,68 @@ class GFGrouper(Grouper):
     def gf(self) -> GroupBy:
         if self._gf is None:
             self._gf = self.df.groupby(
-                self.group_vars,
+                self.vars,
                 maintain_order=self.sort,
             )
         return self._gf
 
     @property
-    def group_data(self) -> pl.DataFrame:
+    def data(self) -> pl.DataFrame:
         """A data frame with groupvar columns and _rows as group row indexes"""
-        if self._group_data is None:
-            self._group_data = (
+        if self._data is None:
+            self._data = (
                 self
                 .gf._groups()
                 .rename({"groups": "_rows"})
                 # In order to keep the order of rows
-                .join(self.group_keys, on=self.group_vars, how="inner")
+                .join(self.keys, on=self.vars, how="inner")
             )
-        return self._group_data
+        return self._data
 
     @property
-    def group_rows(self) -> np.ndarray:
+    def rows(self) -> np.ndarray:
         """The row indexes in each group"""
-        if self._group_rows is None:
-            self._group_rows = self.group_data["_rows"].to_numpy()
-        return self._group_rows
+        if self._rows is None:
+            self._rows = self.data["_rows"].to_numpy()
+        return self._rows
 
     @property
-    def group_keys(self) -> pl.DataFrame:
+    def keys(self) -> pl.DataFrame:
         """A subset of the dataframe, with the groupvar columns only"""
         # self.gf._groups() does not keep the order of rows
         return self.gf.agg([])
 
     @property
-    def group_indices(self) -> np.ndarray:
+    def indices(self) -> np.ndarray:
         """Use indices to mark the group of each row"""
-        if self._group_indices is None:
-            self._group_indices = np.repeat(
-                np.arange(self.n_groups),
-                self.group_size,
+        if self._indices is None:
+            self._indices = np.repeat(
+                np.arange(self.n),
+                self.size,
             )
-        return self._group_indices
+        return self._indices
 
     @property
-    def group_size(self) -> np.ndarray:
+    def size(self) -> np.ndarray:
         """Get the sizes of each group"""
-        if self._group_size is None:
-            self._group_size = self.gf.count()["count"].to_numpy()
-        return self._group_size
+        if self._size is None:
+            self._size = self.gf.count()["count"].to_numpy()
+        return self._size
 
     @property
-    def n_groups(self) -> int:
+    def n(self) -> int:
         """Get the number of groups"""
-        if self._n_groups is None:
-            self._n_groups = self.group_data.shape[0]
-        return self._n_groups
+        if self._n is None:
+            self._n = self.data.shape[0]
+        return self._n
 
     def str_(self) -> str:
         """Get the string representation"""
-        return f"grouped: ({', '.join(self.group_vars)}), n={self.n_groups}"
+        return f"grouped: ({', '.join(self.vars)}), n={self.n}"
 
     def html(self) -> str:
         """Get the html representation"""
-        return f"grouped: ({', '.join(self.group_vars)}), n={self.n_groups}"
+        return f"grouped: ({', '.join(self.vars)}), n={self.n}"
 
 
 class DFGrouper(Grouper):
@@ -201,49 +218,49 @@ class DFGrouper(Grouper):
         return None
 
     @property
-    def group_data(self) -> pl.DataFrame:
+    def data(self) -> pl.DataFrame:
         """A data frame with groupvar columns and _rows as group row indexes"""
-        if self._group_data is None:
-            self._group_data = Tibble(
+        if self._data is None:
+            self._data = Tibble(
                 {"_rows": [np.arange(self.df.shape[0]).tolist()]}
             )
-        return self._group_data
+        return self._data
 
     @property
-    def group_rows(self) -> np.ndarray:
+    def rows(self) -> np.ndarray:
         """The row indexes in each group"""
-        if self._group_rows is None:
-            self._group_rows = np.array(
+        if self._rows is None:
+            self._rows = np.array(
                 [np.arange(self.df.shape[0]).tolist()],
                 dtype=object,
             )
-        return self._group_rows
+        return self._rows
 
     @property
-    def group_keys(self) -> pl.DataFrame:
+    def keys(self) -> pl.DataFrame:
         """A subset of the dataframe, with the groupvar columns only"""
         return Tibble()
 
     @property
-    def group_indices(self) -> np.ndarray:
+    def indices(self) -> np.ndarray:
         """Use indices to mark the group of each row"""
-        if self._group_indices is None:
-            self._group_indices = np.repeat(0, self.df.shape[0])
-        return self._group_indices
+        if self._indices is None:
+            self._indices = np.repeat(0, self.df.shape[0])
+        return self._indices
 
     @property
-    def group_size(self) -> np.ndarray:
+    def size(self) -> np.ndarray:
         """Get the sizes of each group"""
-        if self._group_size is None:
-            self._group_size = np.array([self.df.shape[0]])
-        return self._group_size
+        if self._size is None:
+            self._size = np.array([self.df.shape[0]])
+        return self._size
 
     @property
-    def n_groups(self) -> int:
+    def n(self) -> int:
         """Get the number of groups"""
-        if self._n_groups is None:
-            self._n_groups = 1
-        return self._n_groups
+        if self._n is None:
+            self._n = 1
+        return self._n
 
 
 class RFGrouper(Grouper):
@@ -257,82 +274,67 @@ class RFGrouper(Grouper):
         return None
 
     @property
-    def group_data(self) -> pl.DataFrame:
+    def data(self) -> pl.DataFrame:
         """A data frame with groupvar columns and _rows as group row indexes"""
-        if self._group_data is None:
-            if not self.group_vars:
-                self._group_data = Tibble(
+        if self._data is None:
+            if not self.vars:
+                self._data = Tibble(
                     {"_rows": [[i] for i in range(self.df.shape[0])]}
                 )
             else:
-                self._group_data = self.group_keys.with_column(
+                self._data = self.keys.with_column(
                     pl.Series(
                         name="_rows",
                         values=[[i] for i in range(self.df.shape[0])],
                     )
                 )
-        return self._group_data
+        return self._data
 
     @property
-    def group_rows(self) -> np.ndarray:
+    def rows(self) -> np.ndarray:
         """The row indexes in each group"""
-        if self._group_rows is None:
-            self._group_rows = np.array(
+        if self._rows is None:
+            self._rows = np.array(
                 [[i] for i in range(self.df.shape[0])],
                 dtype=object,
             )
-        return self._group_rows
+        return self._rows
 
     @property
-    def group_keys(self) -> pl.DataFrame:
+    def keys(self) -> pl.DataFrame:
         """A subset of the dataframe, with the groupvar columns only"""
-        if self.group_vars:
-            return self.df[self.group_vars]
+        if self.vars:
+            return self.df[self.vars]
         return Tibble()
 
     @property
-    def group_indices(self) -> np.ndarray:
+    def indices(self) -> np.ndarray:
         """Use indices to mark the group of each row"""
-        if self._group_indices is None:
-            self._group_indices = np.arange(self.df.shape[0])
-        return self._group_indices
+        if self._indices is None:
+            self._indices = np.arange(self.df.shape[0])
+        return self._indices
 
     @property
-    def group_size(self) -> np.ndarray:
+    def size(self) -> np.ndarray:
         """Get the sizes of each group"""
-        if self._group_size is None:
-            self._group_size = np.repeat(1, self.df.shape[0])
-        return self._group_size
+        if self._size is None:
+            self._size = np.repeat(1, self.df.shape[0])
+        return self._size
 
     @property
-    def n_groups(self) -> int:
+    def n(self) -> int:
         """Get the number of groups"""
-        if self._n_groups is None:
-            self._n_groups = self.df.shape[0]
-        return self._n_groups
+        if self._n is None:
+            self._n = self.df.shape[0]
+        return self._n
 
     def str_(self) -> str:
         """Get the string representation"""
-        return f"rowwise: ({', '.join(self.group_vars)})"
+        return f"rowwise: ({', '.join(self.vars)})"
 
     def html(self) -> str:
         """Get the html representation"""
-        return f"rowwise: ({', '.join(self.group_vars)})"
-
-
-@pl.api.register_expr_namespace("datar")
-class ExprDatarNamespace:
-    def __init__(self, expr: pl.Expr):
-        self._expr = expr
-        self._is_rowwise = False
-
-    @property
-    def is_rowwise(self) -> pl.Expr:
-        return self._is_rowwise
-
-    @is_rowwise.setter
-    def is_rowwise(self, value: bool):
-        self._is_rowwise = value
+        return f"rowwise: ({', '.join(self.vars)})"
 
 
 @pl.api.register_dataframe_namespace("datar")
@@ -388,15 +390,6 @@ class SeriesDatarNamespace:
     def __init__(self, series: pl.Series):
         self._series = series
         self._grouper = None
-        self._is_rowwise = False
-
-    @property
-    def is_rowwise(self) -> bool:
-        return self._is_rowwise
-
-    @is_rowwise.setter
-    def is_rowwise(self, value: bool):
-        self._is_rowwise = value
 
     @property
     def grouper(self) -> bool:
@@ -406,52 +399,6 @@ class SeriesDatarNamespace:
     def grouper(self, grouper: Grouper):
         self._grouper = grouper
 
-    def ungroup(self):
+    def ungroup(self) -> pl.Series:
         self._grouper = None
-        self._is_rowwise = False
-
-
-# @pl.api.register_lazyframe_namespace("datar")
-# class LazyFrameDatarNamespace:
-#     def __init__(self, lf: pl.LazyFrame):
-#         self._lf = lf
-#         self._is_grouped = False
-#         self._is_rowwise = False
-#         self._group_vars = []
-#         self._meta = {}
-
-#     def group_by(self, col: str, *cols: str) -> pl.LazyFrame:
-#         self._is_grouped = True
-#         self._group_vars = [col, *cols]
-#         return self._lf
-
-#     def rowwise(self, *cols: str) -> pl.LazyFrame:
-#         self._is_rowwise = True
-#         self._group_vars = cols
-#         return self._lf
-
-#     def ungroup(self) -> pl.LazyFrame:
-#         self._is_grouped = False
-#         self._is_rowwise = False
-#         self._group_vars = []
-#         return self._lf
-
-#     @property
-#     def meta(self) -> Mapping[str, Any]:
-#         return self._meta
-
-#     @meta.setter
-#     def meta(self, value: Mapping[str, Any]):
-#         self._meta = value
-
-#     @property
-#     def is_grouped(self) -> bool:
-#         return self._is_grouped
-
-#     @property
-#     def is_rowwise(self) -> bool:
-#         return self._is_rowwise
-
-#     @property
-#     def group_vars(self) -> List[str]:
-#         return self._group_vars
+        return self._series

@@ -18,7 +18,7 @@ def _desc_obj(x):
 
 @desc.register(Expr, backend="polars")
 def _desc_expr(x: Expr):
-    return x.apply(desc.dispatch(Series, backend="polars"))
+    return x.map(desc.dispatch(Series, backend="polars"))
 
 
 @desc.register(Series, backend="polars")

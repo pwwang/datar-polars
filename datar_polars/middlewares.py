@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from types import MappingProxyType
 from typing import Any, Mapping, Tuple
 
 import polars as pl
@@ -96,17 +95,16 @@ class Across:
                     )
                 elif (
                     getattr(fn, "_pipda_functype", None) == "dispatchable"
-                    and isinstance(
-                        fn.registry.get("polars"),
-                        (dict, MappingProxyType)
-                    )
-                    and pl.Expr in fn.registry.get("polars")
+                    and "polars" in fn.registry
+                    and pl.Expr in fn.registry["polars"].registry
+                    and ret is not None
                 ):
                     value = fn(
                         pl.col(column),
                         *evaluate_expr(args, self.data, context),
                         **evaluate_expr(kwargs, self.data, context),
                     )
+                    value = self.data.select(value)
                 else:
                     value = fn(
                         self.data[column],

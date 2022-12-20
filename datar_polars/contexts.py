@@ -62,10 +62,33 @@ class ContextEvalExpr(ContextEvalPipda):
 class ContextEvalData(ContextEvalPipda):
     """Evaluation context to evaluate pipda expressions into real data"""
 
+    def _save_used_ref(self, parent, ref, level) -> None:
+        """Increments the counters for used references"""
+        if level != 1 or "used_refs" not in parent._datar:
+            return
+
+        parent._datar["used_refs"].add(ref)
+
+    def getitem(self, parent, ref, level):
+        """Interpret f[ref]"""
+        if isinstance(ref, str):
+            if isinstance(parent, DataFrame):
+                self._save_used_ref(parent, ref, level)
+                return parent[ref]
+
+        return super().getitem(parent, ref, level)
+
     def getattr(self, parent, ref, level):
         """Evaluate f.a"""
-        if isinstance(ref, str) and isinstance(parent, (dict, DataFrame)):
-            return parent[ref]
+        if isinstance(ref, str):
+            if isinstance(parent, DataFrame):
+                self._save_used_ref(parent, ref, level)
+                return parent[ref]
+
+        if isinstance(parent, dict):
+            return super().getitem(parent, ref, level)
+
+        return super().getattr(parent, ref, level)
 
     @property
     def ref(self) -> ContextBase:
@@ -81,4 +104,4 @@ class Context(Enum):
     PENDING = ContextPending()
     SELECT = ContextSelect()
     EVAL_EXPR = ContextEvalExpr()
-    EVAL_DATA = ContextEvalData()
+    EVAL = ContextEvalData()

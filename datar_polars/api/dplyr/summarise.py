@@ -129,7 +129,7 @@ def _summarise_build_groupby(
     _data._datar = {"used_refs": set()}
     outframe._datar = {"summarise_source": _data}
     for key, val in chain(enumerate(args), kwargs.items()):
-        val = evaluate_expr(val, _data, Context.EVAL_EXPR)
+        val = evaluate_expr(val, _data, Context.EVAL)
 
         if val is None:
             continue

@@ -53,7 +53,7 @@ def _tibble(
         if isinstance(val, Expression):
             try:
                 # Check if any refers to self (args, kwargs)
-                evaluate_expr(val, eval_data, Context.EVAL_DATA)
+                evaluate_expr(val, eval_data, Context.EVAL)
             except (KeyError, NotImplementedError):
                 # If not, it refers to external data
                 evaled_args.append(val)
@@ -72,7 +72,7 @@ def _tibble(
     for key, val in kwargs.items():
         if isinstance(val, Expression):
             try:
-                evaluate_expr(val, eval_data, Context.EVAL_DATA)
+                evaluate_expr(val, eval_data, Context.EVAL)
             except (KeyError, NotImplementedError):
                 evaled_kws[key] = val
             else:
@@ -93,7 +93,7 @@ def _tibble(
     )
 
 
-@tibble_.register(object, backend="polars", context=Context.EVAL_DATA)
+@tibble_.register(object, backend="polars", context=Context.EVAL)
 def _tibble_(
     *args,
     _name_repair: str | Callable = "check_unique",
@@ -204,14 +204,14 @@ def _tibble_row(
 
 @as_tibble.register(
     (dict, DataFrame),
-    context=Context.EVAL_DATA,
+    context=Context.EVAL,
     backend="polars",
 )
 def _as_tibble_df(df: DataFrame | dict) -> Tibble:
     return Tibble(df)
 
 
-@as_tibble.register(Tibble, context=Context.EVAL_DATA, backend="polars")
+@as_tibble.register(Tibble, context=Context.EVAL, backend="polars")
 def _as_tibble_tbl(df: Tibble) -> Tibble:
     """Convert a polars DataFrame object to Tibble object"""
     return df

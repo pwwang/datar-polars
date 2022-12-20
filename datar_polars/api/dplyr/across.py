@@ -20,7 +20,7 @@ def _across(
     _data: DataFrame,
     *args: Any,
     _names: str = None,
-    _fn_context: Context = Context.EVAL_EXPR,
+    _fn_context: Context = Context.EVAL,
     **kwargs: Any,
 ) -> DataFrame:
     _data = getattr(_data, "_datar", {}).get("summarise_source", _data)

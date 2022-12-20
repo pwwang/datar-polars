@@ -67,13 +67,13 @@ def test_can_rename():
     df = tibble(a=1, b=1, c=1, d="a", e="a", f="a")
 
     out = relocate(df, ffff=f.f)
-    assert out.equals(tibble(ffff="a", a=1, b=1, c=1, d="a", e="a"))
+    assert out.frame_equal(tibble(ffff="a", a=1, b=1, c=1, d="a", e="a"))
 
     out = relocate(df, ffff=f.f, _before=f.c)
-    assert out.equals(tibble(a=1, b=1, ffff="a", c=1, d="a", e="a"))
+    assert out.frame_equal(tibble(a=1, b=1, ffff="a", c=1, d="a", e="a"))
 
     out = relocate(df, ffff=f.f, _after=f.c)
-    assert out.equals(tibble(a=1, b=1, c=1, ffff="a", d="a", e="a"))
+    assert out.frame_equal(tibble(a=1, b=1, c=1, ffff="a", d="a", e="a"))
 
 
 def test_before_0():
@@ -83,7 +83,7 @@ def test_before_0():
 
 
 def test_rename_gvars():
-    df = tibble(x=1, y=2).group_by('x')
+    df = tibble(x=1, y=2).datar.group_by('x')
     out = relocate(df, g=f.x, _after=f.y)
     assert isinstance(out, TibbleGrouped)
-    assert out.group_vars == ['g']
+    assert out.datar.grouper.group_vars == ['g']

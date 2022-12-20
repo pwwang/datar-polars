@@ -27,7 +27,7 @@ def load_dataset(name: str, metadata: Mapping) -> DataFrame:
 def base_api():
     from .api.base import (
         arithm,
-        # asis,
+        asis,
         # bessel,
         # complex,
         # cum,

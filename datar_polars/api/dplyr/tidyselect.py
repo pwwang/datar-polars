@@ -1,10 +1,10 @@
 from __future__ import annotations
 import builtins
-from typing import Callable, List, Sequence
 import re
+from typing import Callable, List, Sequence
 
 import numpy as np
-from polars import DataFrame
+from polars import DataFrame, Expr, col as pl_col
 from datar.apis.dplyr import (
     where,
     everything,
@@ -25,7 +25,7 @@ from ...utils import vars_select, is_scalar, is_logical, setdiff, intersect
 from .group_data import group_vars
 
 
-@where.register(DataFrame, context=Context.EVAL_EXPR, backend="polars")
+@where.register(DataFrame, context=Context.EVAL, backend="polars")
 def _where(_data: DataFrame, fn: Callable) -> List[str]:
     columns = _data >> everything()
     mask = []
@@ -33,10 +33,19 @@ def _where(_data: DataFrame, fn: Callable) -> List[str]:
         if getattr(fn, "_pipda_functype", None) == "verb" and fn.dependent:
             dat = fn(_data[col])._pipda_eval(_data)
             mask.append(dat)
-        elif (
-            getattr(fn, "_pipda_functype", None) == "pipeable"
-        ):  # pragma: no cover
-            mask.append(fn(_data[col], __ast_fallback="normal"))
+        elif getattr(fn, "_pipda_functype", None) == "dispatchable":
+            if (
+                "polars" not in fn.registry
+                or Expr not in fn.registry["polars"].registry
+            ):
+                mask.append(fn(_data[col]))
+            else:
+                # Havn't found using predicate on an Expr as a Series
+                # to filter the column names
+                dat = _data.select(
+                    fn(pl_col(col)).alias("selected")
+                )["selected"]
+                mask.append(dat)
         else:
             mask.append(fn(_data[col]))
 
@@ -49,7 +58,7 @@ def _where(_data: DataFrame, fn: Callable) -> List[str]:
     return np.array(columns)[mask].tolist()
 
 
-@everything.register(DataFrame, context=Context.EVAL_EXPR, backend="polars")
+@everything.register(DataFrame, context=Context.EVAL, backend="polars")
 def _everything(_data: DataFrame) -> List[str]:
     return list(
         setdiff(
@@ -129,7 +138,7 @@ def _matches(
     )
 
 
-@all_of.register(DataFrame, context=Context.EVAL_EXPR, backend="polars")
+@all_of.register(DataFrame, context=Context.EVAL, backend="polars")
 def _all_of(
     _data: DataFrame,
     x: Sequence[int | str],

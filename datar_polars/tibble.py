@@ -4,7 +4,7 @@ from functools import singledispatch, wraps
 from itertools import chain
 from typing import Any, Callable, Mapping, Sequence
 
-from polars import DataFrame, DataType, Series, lit, all as pl_all
+from polars import DataFrame, DataType, Series, Expr, lit, all as pl_all
 from polars.exceptions import NotFoundError
 from pipda import evaluate_expr
 from datar.core.names import repair_names
@@ -12,26 +12,6 @@ from datar.core.names import repair_names
 from .collections import Collection
 from .utils import name_of, to_expr, is_scalar
 
-
-# class LazyTibble(LazyFrame):
-#     @classmethod
-#     @property
-#     def _dataframe_class(cls):
-#         return Tibble
-
-
-# class LazyTibbleGrouped(LazyFrame):
-#     @classmethod
-#     @property
-#     def _dataframe_class(cls):
-#         return TibbleGrouped
-
-
-# class LazyTibbleRowwise(LazyFrame):
-#     @classmethod
-#     @property
-#     def _dataframe_class(cls):
-#         return TibbleRowwise
 
 def _keep_ns(method: Callable) -> Callable:
     """Decorator to keep the namespace of the method"""
@@ -92,7 +72,7 @@ class Tibble(DataFrame):
                 raise
 
             result = self.select(subdf_cols)
-            result.columns = [col[len(key) + 1:] for col in subdf_cols]
+            result.columns = [col[len(key) + 1 :] for col in subdf_cols]
 
         return result
 
@@ -166,6 +146,11 @@ class Tibble(DataFrame):
 
 
 class TibbleGrouped(Tibble):
+    def __getitem__(self, key):
+        out = super().__getitem__(key)
+        if isinstance(key, str):
+            return SeriesGrouped(out, grouper=self.datar.grouper)
+        return out
 
     def __str__(self) -> str:
         return f"{self.datar.grouper.str_()}\n{super().__str__()}"
@@ -175,11 +160,16 @@ class TibbleGrouped(Tibble):
         return html.replace(
             '<table border="1" class="dataframe">\n',
             '<table border="1" class="dataframe">\n'
-            f'<small>{self.datar.grouper.html()}</small>\n<br />\n',
+            f"<small>{self.datar.grouper.html()}</small>\n<br />\n",
         )
 
 
 class TibbleRowwise(Tibble):
+    def __getitem__(self, key):
+        out = super().__getitem__(key)
+        if isinstance(key, str):
+            return SeriesRowwise(out, grouper=self.datar.grouper)
+        return out
 
     def __str__(self) -> str:
         return f"{self.datar.grouper.str_()}\n{super().__str__()}"
@@ -189,8 +179,26 @@ class TibbleRowwise(Tibble):
         return html.replace(
             '<table border="1" class="dataframe">\n',
             '<table border="1" class="dataframe">\n'
-            f'<small>{self.datar.grouper.html()}</small>\n<br />\n',
+            f"<small>{self.datar.grouper.html()}</small>\n<br />\n",
         )
+
+
+class SeriesGrouped(Series):
+    def __init__(self, *args, grouper=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.datar.grouper = grouper
+
+
+class SeriesRowwise(Series):
+    def __init__(self, *args, grouper=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.datar.grouper = grouper
+
+
+class SeriesAgg(Series):
+    def __init__(self, *args, grouper=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.datar.grouper = grouper
 
 
 @singledispatch
@@ -255,7 +263,7 @@ def add_to_tibble(
     if tbl is None:
         return init_tibble_from(value, name, dtype)
 
-    if broadcast_tbl:
+    if broadcast_tbl and not isinstance(value, Expr):
         tbl = broadcast_base(value, tbl, name)
 
     if not name and isinstance(value, DataFrame):
@@ -266,6 +274,11 @@ def add_to_tibble(
 
     if isinstance(value, DataFrame) and value.shape[1] == 0:
         value = None
+
+    if isinstance(value, Expr):
+        if dtype:
+            value = value.cast(dtype)
+        return tbl.with_column(value.alias(name))
 
     if is_scalar(value):
         val = lit(value)
