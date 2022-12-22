@@ -28,7 +28,7 @@ class Factor(pl.Series):
 
     @levels.setter
     def levels(self, lvls):
-
+        ...
 
     def __str__(self) -> str:
         return f"{self.datar.grouper.str_()}\n{super().__str__()}"

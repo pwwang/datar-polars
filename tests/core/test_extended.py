@@ -11,6 +11,8 @@ from ..conftest import assert_iterable_equal
 def test_gfgrouper():
     df = pl.DataFrame({"x": [2, 2, 3], "y": [3, 2, 1]})
     grouper = GFGrouper(df, ["x"])
+    assert grouper.str_() == "grouped: (x), n=2"
+    assert grouper.html() == "grouped: (x), n=2"
     with pytest.raises(ValueError):
         GFGrouper(grouper.gf, ["y"])
 
@@ -41,10 +43,31 @@ def test_gfgrouper():
         ),
     )
     assert_frame_equal(grouper.keys, pl.DataFrame({"x": [2, 3]}))
+    assert_frame_equal(
+        grouper.rows_size,
+        pl.DataFrame({"x": [2, 3], "_rows": [[0, 1], [2]], "_size": [2, 1]}),
+        check_dtype=False,
+    )
     assert_iterable_equal(grouper.rows, [[0, 1], [2]])
     assert_iterable_equal(grouper.indices, [0, 0, 1])
     assert_iterable_equal(grouper.size, [2, 1])
     assert grouper.n == 2
+
+
+def test_grouper_compatible_with():
+    df = pl.DataFrame({"x": [2, 2, 3], "y": [3, 2, 1]})
+    df2 = pl.DataFrame({"x": [1, 2, 3], "y": [3, 2, 1]})
+    df3 = pl.DataFrame({"x": [2, 3, 3], "y": [3, 2, 1]})
+    grouper = GFGrouper(df, ["x"])
+    grouper2 = GFGrouper(df, ["y"])
+    grouper3 = GFGrouper(df, ["z"])
+    grouper4 = GFGrouper(df2, ["x"])
+    grouper5 = GFGrouper(df3, ["x"])
+    assert grouper.compatible_with(grouper)
+    assert not grouper.compatible_with(grouper2)
+    assert not grouper.compatible_with(grouper3)
+    assert not grouper.compatible_with(grouper4)
+    assert grouper.compatible_with(grouper5)
 
 
 def test_dfgrouper():
@@ -70,6 +93,8 @@ def test_dfgrouper():
 def test_rfgrouper():
     df = pl.DataFrame({"x": [2, 2, 3], "y": [3, 2, 1]})
     grouper = RFGrouper(df)
+    assert grouper.str_() == "rowwise: ()"
+    assert grouper.html() == "rowwise: ()"
     assert grouper.df is df
     assert grouper.gf is None
     assert grouper.vars == []
@@ -160,6 +185,36 @@ def test_dataframe_namespace():
     assert df.datar.meta == {"a": 1}
 
 
+def test_tibblegrouped_regroup():
+    df = pl.DataFrame({"x": [2, 2, 3], "y": [4, 5, 6]})
+    df2 = pl.DataFrame({"x": [2, 2, 3, 3], "y": [4, 5, 6, 7]})
+    gf = df.datar.group_by("x")
+    with pytest.raises(ValueError):
+        df.datar.regroup(1)
+
+    regrouped = gf.datar.regroup(1)
+    assert_iterable_equal(regrouped["x"], [2, 2, 3])
+
+    regrouped = gf.datar.regroup(2)
+    assert_iterable_equal(regrouped["x"], [2, 2, 3, 3])
+
+    regrouped = gf.datar.regroup(GFGrouper(df2, ["x"]))
+    assert_iterable_equal(regrouped["x"], [2, 2, 3, 3])
+
+
+def test_df_as_agg():
+    df1 = pl.DataFrame({"a": [1, 1, 2, 2], "b": [4, 5, 6, 7]})
+    grouper1 = GFGrouper(df1, ["a"])
+    df2 = pl.DataFrame({"x": [2, 3], "y": [5, 6]})
+    grouper2 = GFGrouper(df2, ["x"])
+    with pytest.raises(ValueError):
+        df1.datar.as_agg(grouper1)
+
+    dfagg = df2.datar.as_agg(grouper2)
+    assert_iterable_equal(dfagg.datar.agg_keys["_size"], [1, 1])
+    assert_frame_equal(dfagg.datar.agg_keys.drop("_size"), grouper2.keys)
+
+
 def test_series_namespace():
     s = pl.Series("x", [2, 2, 3])
     assert s.datar.grouper is None
@@ -169,3 +224,20 @@ def test_series_namespace():
 
     s.datar.ungroup()
     assert s.datar.grouper is None
+
+    assert s.datar.meta == {}
+    s.datar.meta = {"a": 1}
+    assert s.datar.meta == {"a": 1}
+
+
+def test_series_as_agg():
+    df1 = pl.DataFrame({"a": [1, 1, 2, 2], "b": [4, 5, 6, 7]})
+    grouper1 = GFGrouper(df1, ["a"])
+    df2 = pl.DataFrame({"x": [2, 3], "y": [5, 6]})
+    grouper2 = GFGrouper(df2, ["x"])
+    with pytest.raises(ValueError):
+        df1["b"].datar.as_agg(grouper1)
+
+    sagg = df2["y"].datar.as_agg(grouper2)
+    assert_iterable_equal(sagg.datar.agg_keys["_size"], [1, 1])
+    assert_frame_equal(sagg.datar.agg_keys.drop("_size"), grouper2.keys)

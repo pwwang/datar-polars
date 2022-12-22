@@ -1,12 +1,14 @@
 import pytest
 
 # from datar.base import factor, c
+import polars as pl
 from datar.tibble import tibble
+from datar_polars.extended import GFGrouper
 from datar_polars.tibble import TibbleGrouped, TibbleRowwise
 from datar_polars.broadcast import (
     _broadcast_base,
     # broadcast2,
-    # broadcast_to,
+    broadcast_to,
     # add_to_tibble,
     # init_tibble_from,
     # _get_index_grouper,
@@ -21,219 +23,206 @@ def test_broadcast_base_scalar():
     assert out is df
 
 
-# def test_broadcast_base_array_groupby():
-#     df = tibble(a=[]).groupby("a")
-#     with pytest.raises(ValueError, match=r"`\[1, 2\]` must be size"):
-#         _broadcast_base([1, 2], df)
+def test_broadcast_base_array_groupby():
+    df = tibble(a=[]).datar.group_by("a")
+    with pytest.raises(ValueError, match=r"`\[1, 2\]` must be size"):
+        _broadcast_base([1, 2], df)
 
-#     # all size-1 groups
-#     df = tibble(a=[1, 2]).groupby("a")
-#     out = _broadcast_base([1, 2], df)
-#     assert get_obj(out.a).values.tolist() == [1, 1, 2, 2]
+    # all size-1 groups
+    df = tibble(a=[1, 2]).datar.group_by("a")
+    out = _broadcast_base([1, 2], df)
+    assert_iterable_equal(out['a'], [1, 1, 2, 2])
 
-#     df = tibble(a=[1, 2, 1, 2]).groupby("a")
-#     with pytest.raises(ValueError, match=r"Cannot recycle `x` with size"):
-#         _broadcast_base([1, 2, 3], df, "x")
+    df = tibble(a=[1, 2, 1, 2]).datar.group_by("a")
+    with pytest.raises(ValueError, match=r"Cannot recycle `x` with size"):
+        _broadcast_base([1, 2, 3], df, "x")
 
-#     df = tibble(a=[2, 2, 1, 2]).groupby("a")
-#     with pytest.raises(ValueError, match=r"Cannot recycle `\[1, 2\]`"):
-#         _broadcast_base([1, 2], df)
+    df = tibble(a=[2, 2, 1, 2]).datar.group_by("a")
+    with pytest.raises(ValueError, match=r"Cannot recycle `\[1, 2\]`"):
+        _broadcast_base([1, 2], df)
 
-#     get_obj(df).index = [0, 0, 1, 0]
-#     out = _broadcast_base([1, 2, 3], df)
-#     assert out is df
+    df.datar.meta["broadcasted"] = True
+    out = _broadcast_base([1, 2, 3], df)
+    assert out is df
 
-#     df = tibble(a=[2, 2, 1, 2]).groupby("a")
-#     out = _broadcast_base([1, 2, 3], df)
-#     assert get_obj(out.a).values.tolist() == [2, 2, 1, 1, 1, 2]
+    df = tibble(a=[2, 2, 1, 2]).datar.group_by("a")
+    out = _broadcast_base([1, 2, 3], df)
+    assert_iterable_equal(out['a'], [2, 2, 1, 1, 1, 2])
+    assert out.datar.grouper.n == 2
+    assert_iterable_equal(out.datar.grouper.rows[0], [0, 1, 5])
+    assert_iterable_equal(out.datar.grouper.rows[1], [2, 3, 4])
 
-#     df = tibble(a=[1, 2, 2, 3, 3, 3]).groupby("a")
-#     with pytest.raises(
-#         ValueError, match=r"Cannot recycle `x` with size 2 to 1"
-#     ):
-#         _broadcast_base([1, 2], df, "x")
+    df = tibble(a=[1, 2, 2, 3, 3, 3]).datar.group_by("a")
+    with pytest.raises(
+        ValueError, match=r"Cannot recycle `x` with size 2 to 1"
+    ):
+        _broadcast_base([1, 2], df, "x")
 
-#     df = tibble(a=[1, 2, 1, 2]).group_by("a")
-#     out = _broadcast_base([1, 2], df)
-#     assert out is df
+    df = tibble(a=[1, 2, 1, 2]).datar.group_by("a")
+    out = _broadcast_base([1, 2], df)
+    assert out is df
 
-#     # TibbleGrouped
-#     df = tibble(a=[1, 2, 1]).group_by("a")
-#     out = _broadcast_base([1, 2], df)
-#     assert get_obj(out.a).values.tolist() == [1, 2, 2, 1]
+    # TibbleGrouped
+    df = tibble(a=[1, 2, 1]).datar.group_by("a")
+    out = _broadcast_base([1, 2], df)
+    assert out.datar.meta["broadcasted"] is True
+    assert_iterable_equal(out["a"], [1, 2, 2, 1])
 
-#     df = tibble(a=[1, 2, 1]).rowwise("a")
-#     with pytest.raises(ValueError, match=r"must be size 1"):
-#         _broadcast_base([1, 2], df)
-#     with pytest.raises(ValueError, match=r"must be size 1"):
-#         _broadcast_base([1, 2], df.a)
-
-
-# def test_broadcast_base_array_ndframe():
-#     df = tibble(a=[1, 2, 3, 4])
-#     df.index = [0, 1, 1, 1]
-
-#     out = _broadcast_base([1, 2], df)
-#     assert out is df
-
-#     df = tibble(a=[1, 2, 3])
-#     base = _broadcast_base([1, 2, 3], df)
-#     assert base is df
-
-#     df = tibble(a=1)
-#     base = _broadcast_base([1, 2, 3], df)
-#     assert base.a.tolist() == [1] * 3
-
-#     df = tibble(a=c[:3])
-#     with pytest.raises(ValueError, match=r"`x` must be size \[1 3\], not 2\."):
-#         _broadcast_base([1, 2], df, "x")
+    df = tibble(a=[1, 2, 1]).datar.rowwise("a")
+    with pytest.raises(ValueError, match=r"must be size 1"):
+        _broadcast_base([1, 2], df)
+    with pytest.raises(ValueError, match=r"must be size 1"):
+        _broadcast_base([1, 2], df['a'])
 
 
-# def test_broadcast_base_groupby_groupby():
-#     # incompatible grouper
-#     df = tibble(a=[1, 2, 3]).groupby("a")
-#     value = tibble(a=[1, 2, 2]).groupby("a")
-#     with pytest.raises(ValueError, match=r"`x` has an incompatible grouper"):
-#         _broadcast_base(value, df, "x")
+def test_broadcast_base_array_ndframe():
+    df = tibble(a=[1, 2, 3, 4])
+    # df.index = [0, 1, 1, 1]
+    df.datar.meta["broadcasted"] = True
 
-#     # base doesn't broadcast when all size-1 groups
-#     df = tibble(a=[1, 2, 3]).groupby("a")
-#     base = _broadcast_base(df, df)
-#     assert base is df
+    out = _broadcast_base([1, 2], df)
+    assert out is df
 
-#     # group names differ
-#     value1 = tibble(b=[1, 2, 3]).groupby("b")
-#     with pytest.raises(ValueError, match=r"`x` has an incompatible grouper"):
-#         _broadcast_base(value1, df, "x")
+    df = tibble(a=[1, 2, 3])
+    base = _broadcast_base([1, 2, 3], df)
+    assert base is df
 
-#     # index not unique, already broadcasted
-#     df = tibble(a=[2, 1, 2])
-#     df.index = [1, 0, 1]
-#     df = df.groupby("a")
-#     base = _broadcast_base(value, df)
-#     assert base is df
+    df = tibble(a=1)
+    base = _broadcast_base([1, 2, 3], df)
+    assert_iterable_equal(base['a'], [1] * 3)
 
-#     # size-1 group gets broadcasted
-#     df = tibble(a=[2, 1, 2]).groupby("a")
-#     value = tibble(a=[1, 2, 1]).groupby("a")
-#     base = _broadcast_base(value, df)
-#     assert get_obj(base.a).values.tolist() == [2, 1, 1, 2]
-
-#     # TibbleGrouped
-#     df = tibble(a=[1, 2, 2]).group_by("a")
-#     base = _broadcast_base(value, df)
-#     assert get_obj(base.a).values.tolist() == [1, 1, 2, 2]
-
-#     # rowwise
-#     df = tibble(a=[1, 2, 2]).rowwise()
-#     base = _broadcast_base(df.a, df.a)
-#     assert get_obj(base) is get_obj(df.a)
-
-#     base = _broadcast_base(df.a, df)
-#     assert base is df
-
-#     value = tibble(a=[1, 2, 3]).groupby("a")
-#     with pytest.raises(ValueError):
-#         _broadcast_base(value, df)
+    df = tibble(a=[0, 1, 2])
+    with pytest.raises(ValueError, match=r"`x` must be size \[1 3\], not 2\."):
+        _broadcast_base([1, 2], df, "x")
 
 
-# def test_broadcast_base_groupby_ndframe():
-#     df = tibble(a=[1, 2, 2, 3, 3, 3])
-#     with pytest.raises(ValueError, match="Can't recycle"):
-#         _broadcast_base(df.groupby("a"), df)
+def test_broadcast_base_groupby_groupby():
+    # incompatible grouper
+    df = tibble(a=[1, 2, 3]).datar.group_by("a")
+    value = tibble(a=[1, 2, 2]).datar.group_by("a")
+    with pytest.raises(ValueError, match=r"`x` has an incompatible grouper"):
+        _broadcast_base(value, df, "x")
 
-#     # only when group sizes are len(value) or [1, len(value)]
-#     value = tibble(a=[2, 1, 2, 1]).groupby("a")
-#     df = tibble(a=3)
-#     base = _broadcast_base(value, df)
-#     assert get_obj(base.a).tolist() == [3, 3, 3, 3]
+    # base doesn't broadcast when all size-1 groups
+    df = tibble(a=[1, 2, 3]).datar.group_by("a")
+    base = _broadcast_base(df, df)
+    assert base is df
 
-#     df = tibble(a=[3, 4])
-#     base = _broadcast_base(value, df)
-#     assert get_obj(base.a).tolist() == [3, 3, 4, 4]
+    # group names differ
+    value1 = tibble(b=[1, 2, 3]).datar.group_by("b")
+    with pytest.raises(ValueError, match=r"`x` has an incompatible grouper"):
+        _broadcast_base(value1, df, "x")
 
-#     # TibbleGrouped
-#     value = tibble(a=[2, 1, 2, 1]).group_by("a")
-#     base = _broadcast_base(value, df)
-#     assert get_obj(base.a).tolist() == [3, 3, 4, 4]
+    # index not unique, already broadcasted
+    df = tibble(a=[2, 1, 1]).datar.group_by("a")
+    df.datar.meta["broadcasted"] = True
+    base = _broadcast_base(value, df)
+    assert base is df
 
+    # size-1 group gets broadcasted
+    df = tibble(a=[2, 1, 2]).datar.group_by("a")
+    value = tibble(a=[1, 2, 1]).datar.group_by("a")
+    base = _broadcast_base(value, df)
+    assert_iterable_equal(base['a'], [2, 1, 1, 2])
 
-# def test_broadcast_base_ndframe_groupby():
-#     df = tibble(a=1).groupby("a")
-#     value = Series(1, name="b")
-#     with pytest.raises(
-#         ValueError, match="`b` is an incompatible aggregated result"
-#     ):
-#         _broadcast_base(value, df)
+    # TibbleGrouped
+    df = tibble(a=[1, 2, 2]).datar.group_by("a")
+    base = _broadcast_base(value, df)
+    assert_iterable_equal(base["a"], [1, 1, 2, 2])
 
-#     value = Series(1, index=[2])
-#     value.index.name = "a"
-#     with pytest.raises(
-#         ValueError, match="`x` is an incompatible aggregated result"
-#     ):
-#         _broadcast_base(value, df, "x")
+    # rowwise
+    df = tibble(a=[1, 2, 2]).datar.rowwise()
+    base = df['a']
+    broadcasted = _broadcast_base(df['a'], base)
+    assert broadcasted is base
 
-#     df = tibble(a=[2, 1, 2, 1]).groupby("a")
-#     value = Series([1, 3, 3, 3], index=[1, 2, 2, 2])
-#     value.index.name = "a"
-#     with pytest.raises(
-#         ValueError, match="`x` is an incompatible aggregated result"
-#     ):
-#         _broadcast_base(value, df, "x")
+    base = _broadcast_base(df['a'], df)
+    assert base is df
 
-#     df = tibble(a=[2, 1, 2, 1]).groupby("a")
-#     value = df.a.sum()
-#     base = _broadcast_base(value, df)
-#     assert base is df
-
-#     df = tibble(a=[1, 2]).groupby("a")
-#     get_obj(df).index = [1, 1]
-#     value = df.a.apply(lambda x: range(x.values[0])).explode().astype(int)
-#     base = _broadcast_base(value, df)
-#     assert base is df
-
-#     # Broadcast size-1 groups in base
-#     df = tibble(a=[1, 2]).groupby("a")
-#     base = _broadcast_base(value, df)
-#     assert get_obj(base.a).tolist() == [1, 2, 2]
-
-#     # TibbleGrouped
-#     df = tibble(a=[1, 2]).group_by("a")
-#     base = _broadcast_base(value, df)
-#     assert get_obj(base.a).tolist() == [1, 2, 2]
-
-#     # Rowwise
-#     df = tibble(a=[1, 2]).rowwise()
-#     value = tibble(a=1)
-#     base = _broadcast_base(value, df)
-#     assert base is df
-
-#     base = _broadcast_base(value, df.a)
-#     assert get_obj(base) is get_obj(df.a)
-
-#     value = tibble(a=[1, 2, 3])
-#     with pytest.raises(ValueError):
-#         _broadcast_base(value, df)
+    value = tibble(a=[1, 2, 3]).datar.group_by("a")
+    with pytest.raises(ValueError):
+        _broadcast_base(value, df)
 
 
-# def test_broadcast_base_ndframe_ndframe():
-#     df = tibble(a=[1, 2, 3])
-#     df.index = [0, 1, 1]
-#     value = tibble(a=[1, 2, 3])
-#     base = _broadcast_base(value, df)
-#     assert base is df
+def test_broadcast_base_groupby_ndframe():
+    df = tibble(a=[1, 2, 2, 3, 3, 3])
+    with pytest.raises(ValueError, match="Can't recycle"):
+        _broadcast_base(df.datar.group_by("a"), df)
 
-#     df = tibble(a=[1, 2, 3])
-#     value = tibble(a=[1, 2, 3])
-#     value.index = [1, 2, 3]
-#     base = _broadcast_base(value, df)
-#     assert_iterable_equal(base.a, [1, 2, 3])
+    # only when group sizes are len(value) or [1, len(value)]
+    value = tibble(a=[2, 1, 2, 1]).datar.group_by("a")
+    df = tibble(a=3)
+    base = _broadcast_base(value, df)
+    assert_iterable_equal(base["a"], [3, 3, 3, 3])
+
+    df = tibble(a=[3, 4])
+    base = _broadcast_base(value, df)
+    assert_iterable_equal(base["a"], [3, 3, 4, 4])
+
+    # TibbleGrouped
+    value = tibble(a=[2, 1, 2, 1]).datar.group_by("a")
+    base = _broadcast_base(value, df)
+    assert_iterable_equal(base["a"], [3, 3, 4, 4])
 
 
-# # broadcast_to
-# def test_broadcast_to_scalar():
-#     value = broadcast_to(1, Index([1, 2]))
-#     assert value == 1
+def test_broadcast_base_ndframe_groupby():
+    df = tibble(a=1, b=2).datar.group_by("a")
+    gp = GFGrouper(df, ["b"])
+    value = pl.Series("b", [1]).datar.as_agg(gp)
+    with pytest.raises(
+        ValueError, match="`b` is an incompatible aggregated result"
+    ):
+        _broadcast_base(value, df)
+
+    df = tibble(a=[2, 1, 2, 1]).datar.group_by("a")
+    value = pl.Series([3, 4]).datar.as_agg(df.datar.grouper)
+    base = _broadcast_base(value, df)
+    assert base is df
+
+    df = tibble(a=[1, 2]).datar.group_by("a")
+    df.datar.meta["broadcasted"] = True
+    base = _broadcast_base(value, df)
+    assert base is df
+
+    # Broadcast size-1 groups in base
+    df = tibble(a=[1, 2]).datar.group_by("a")
+    value = pl.Series([3, 4, 4]).datar.as_agg(df.datar.grouper, [1, 2])
+    base = _broadcast_base(value, df)
+    assert_iterable_equal(base['a'], [1, 2, 2])
+
+    # Rowwise
+    df = tibble(a=[1, 2]).datar.rowwise()
+    value = tibble(a=1)
+    base = _broadcast_base(value, df)
+    assert base is df
+
+    base = df['a']
+    broadcasted = _broadcast_base(value, base)
+    assert broadcasted is base
+
+    value = tibble(a=[1, 2, 3])
+    with pytest.raises(ValueError):
+        _broadcast_base(value, df)
+
+
+def test_broadcast_base_ndframe_ndframe():
+    df = tibble(a=[1, 2, 3])
+    df.datar.agg_index = tibble(a=[0, 1, 1])
+    value = tibble(a=[1, 2, 3])
+    base = _broadcast_base(value, df)
+    assert base is df
+
+    df = tibble(a=[1, 2, 3])
+    value = tibble(a=[1, 2, 3])
+    value.datar.agg_index = tibble(a=[1, 2, 3])
+    base = _broadcast_base(value, df)
+    assert_iterable_equal(base['a'], [1, 2, 3])
+
+
+# broadcast_to
+def test_broadcast_to_scalar():
+    value = broadcast_to(1, 2)
+    assert value == 1
 
 
 # def test_broadcast_to_factor():

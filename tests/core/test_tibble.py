@@ -146,7 +146,7 @@ def test_tibble_copy():
     df = Tibble.from_args(a=[1, 2, 3])
     df.datar.meta["a"] = 1
 
-    df2 = df.copy()
+    df2 = df.datar.copy()
     assert df2.datar.meta["a"] == 1
 
 

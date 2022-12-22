@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from functools import singledispatch, wraps
 from itertools import chain
-from typing import Any, Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
+import numpy as np
 from polars import DataFrame, DataType, Series, Expr, lit, all as pl_all
 from polars.exceptions import NotFoundError
 from pipda import evaluate_expr
@@ -11,6 +13,9 @@ from datar.core.names import repair_names
 
 from .collections import Collection
 from .utils import name_of, to_expr, is_scalar
+
+if TYPE_CHECKING:
+    from .extended import Grouper
 
 
 def _keep_ns(method: Callable) -> Callable:
@@ -27,6 +32,17 @@ def _keep_ns(method: Callable) -> Callable:
     return wrapper
 
 
+def _to_agg(method: Callable) -> Callable:
+    """Decorator to make sure grouped return SeriesAgg or TableAgg object"""
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        out = method(self, *args, **kwargs)
+        return out.as_agg(self.datar.grouper)
+
+    return wrapper
+
+
 class Tibble(DataFrame):
     # Not working with polars 0.15
     # _lazyframe_class = LazyTibble
@@ -38,12 +54,6 @@ class Tibble(DataFrame):
             return
 
         super().__init__(data, columns, orient)
-
-    def copy(self, copy_meta=True):
-        """Copy the tibble"""
-        out = self.clone()
-        out.datar.update_from(self)
-        return out
 
     select = _keep_ns(DataFrame.select)
     drop = _keep_ns(DataFrame.drop)
@@ -110,7 +120,7 @@ class Tibble(DataFrame):
 
         out = None
         for name, value in zip(names, values):
-            value = evaluate_expr(value, out, Context.EVAL_DATA)
+            value = evaluate_expr(value, out, Context.EVAL)
             dtype = _dtypes.get(name) if isinstance(_dtypes, dict) else _dtypes
             if isinstance(value, Collection):
                 value.expand()
@@ -149,7 +159,7 @@ class TibbleGrouped(Tibble):
     def __getitem__(self, key):
         out = super().__getitem__(key)
         if isinstance(key, str):
-            return SeriesGrouped(out, grouper=self.datar.grouper)
+            return SeriesGrouped(key, out, grouper=self.datar.grouper)
         return out
 
     def __str__(self) -> str:
@@ -168,7 +178,7 @@ class TibbleRowwise(Tibble):
     def __getitem__(self, key):
         out = super().__getitem__(key)
         if isinstance(key, str):
-            return SeriesRowwise(out, grouper=self.datar.grouper)
+            return SeriesRowwise(key, out, grouper=self.datar.grouper)
         return out
 
     def __str__(self) -> str:
@@ -183,22 +193,107 @@ class TibbleRowwise(Tibble):
         )
 
 
-class SeriesGrouped(Series):
+class Aggregated(ABC):
+
+    def _get_broadcasted_indexes(
+        self,
+        new_sizes: int | Sequence[int] | np.ndarray | Grouper,
+    ) -> np.ndarray:
+        """Broadcast the series to a new sizes"""
+        if is_scalar(new_sizes):
+            new_sizes = [new_sizes]
+
+        if isinstance(new_sizes, Grouper):
+            # agg_keys:
+            #  *gvars, _size
+            df = self.datar.agg_keys.join(
+                new_sizes.rows_size.rename({"_size": "_new_sizes"}),
+                how="left",
+                on=self.datar.agg_keys.columns,
+            )
+        else:
+            df = self.datar.agg_keys.with_column(
+                Series("_new_sizes", new_sizes)
+            )
+
+        # df
+        # *gvars, _size, _new_sizes
+        # get the broadcasted indexes
+        broadcasted_indexes = []
+        index = 0
+        for size, new_size in zip(df["_size"], df["_new_sizes"]):
+            if size != 1 and size != new_size:
+                raise ValueError(
+                    "Cannot broadcast to different sizes"
+                )
+            indices = range(index, index + size)
+            if size == 1:
+                indices = indices * new_size
+            # else:  # size == new_size
+            broadcasted_indexes.extend(indices)
+            index += size
+
+        return broadcasted_indexes
+
+    @abstractmethod
+    def broadcast_to(
+        self,
+        new_sizes: int | Sequence[int] | np.ndarray | Grouper,
+    ) -> SeriesBase | Tibble:
+        ...
+
+
+class SeriesAgg(Series, Aggregated):
+
+    def broadcast_to(
+        self,
+        new_sizes: int | Sequence[int] | np.ndarray | Grouper,
+    ) -> SeriesBase | Tibble:
+        broadcasted_indexes = self._get_broadcasted_indexes(new_sizes)
+        out = self[broadcasted_indexes]
+        if isinstance(new_sizes, Grouper):
+            out = SeriesGrouped(self.name, out, grouper=new_sizes)
+        return out
+
+
+class TibbleAgg(Tibble, Aggregated):
+
+    def broadcast_to(
+        self,
+        new_sizes: int | Sequence[int] | np.ndarray | Grouper,
+    ) -> SeriesBase | Tibble:
+        broadcasted_indexes = self._get_broadcasted_indexes(new_sizes)
+        out = self[broadcasted_indexes, :]
+        if isinstance(new_sizes, Grouper):
+            out = TibbleGrouped(out)
+            out.datar._grouper = new_sizes
+        return out
+
+
+class SeriesBase(Series, ABC):
+
     def __init__(self, *args, grouper=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.datar.grouper = grouper
 
 
-class SeriesRowwise(Series):
-    def __init__(self, *args, grouper=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.datar.grouper = grouper
+class SeriesGrouped(SeriesBase):
+
+    # make sure these methods return SeriesAgg
+    all = _to_agg(Series.all)
+    any = _to_agg(Series.any)
+    max = _to_agg(Series.max)
+    min = _to_agg(Series.min)
+    mean = _to_agg(Series.mean)
+    median = _to_agg(Series.median)
+    nan_max = _to_agg(Series.nan_max)
+    nan_min = _to_agg(Series.nan_min)
+    null_count = _to_agg(Series.null_count)
+    sum = _to_agg(Series.sum)
 
 
-class SeriesAgg(Series):
-    def __init__(self, *args, grouper=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.datar.grouper = grouper
+class SeriesRowwise(SeriesBase):
+    ...
 
 
 @singledispatch
@@ -243,7 +338,7 @@ def _init_tibble_frame_df(
 def _init_tibble_frame_tibble(
     value: Tibble, name: str, dtype: DataType
 ) -> Tibble:
-    out = value.copy()
+    out = value.datar.copy()
     if name:
         out.columns = [f"{name}${col}" for col in out.columns]
     return out

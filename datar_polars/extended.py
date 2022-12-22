@@ -1,12 +1,13 @@
 from __future__ import annotations
 from abc import ABC, abstractproperty
-from typing import Any, List, Mapping
+from typing import Any, List, Mapping, Sequence
 
 import numpy as np
 import polars as pl
 from polars.internals.dataframe.groupby import GroupBy
 
-from .tibble import Tibble, TibbleGrouped, TibbleRowwise
+from .tibble import Tibble, TibbleGrouped, TibbleRowwise, SeriesAgg, TibbleAgg
+from .utils import is_scalar
 
 
 class Grouper(ABC):
@@ -35,6 +36,7 @@ class Grouper(ABC):
         self._rows = None
         self._size = None
         self._vars = by
+        self._rows_size = None
         self._n = None
         self._df = df
         self._gf = None
@@ -76,6 +78,11 @@ class Grouper(ABC):
     def size(self) -> np.ndarray:
         """Get the sizes of each group"""
 
+    @property
+    def rows_size(self) -> int:
+        """Append size to group_data frame"""
+        return self.data.with_column(pl.Series("_size", self.size))
+
     @abstractproperty
     def n(self) -> int:
         """Get the number of groups"""
@@ -88,13 +95,53 @@ class Grouper(ABC):
         if self.vars != other.vars:
             return False
 
-        if self.keys.unique().frame_equal(self.keys.unique()):
+        try:
+            # It's possible that the frame is groupby non-existing columns
+            df = self.keys.join(other.rows_size, how="left", on=self.vars)
+        except pl.NotFoundError:
             return False
 
+        # other has more groups
+        if df.shape[0] < other.rows_size.shape[0]:
+            return False
+
+        # other has less groups
+        if df["_size"].null_count() > 0:
+            return False
+
+        other_size = df["_size"].to_numpy()
         return (
             (self.size == 1)
-            | (other.size == 1)
-            | (self.size == other.size)
+            | (other_size == 1)
+            | (self.size == other_size)
+        ).all()
+
+    def compatible_with_agg_keys(self, agg_keys: pl.DataFrame) -> bool:
+        """Check if the group keys are compatible with the agg keys"""
+        if self.vars != agg_keys.columns[:-1]:
+            return False
+
+        # agg_keys:
+        #  *gvars, _size
+        try:
+            # It's possible that the frame is groupby non-existing columns
+            df = self.keys.join(agg_keys, how="left", on=self.vars)
+        except pl.NotFoundError:
+            return False
+
+        # other has more groups
+        if df.shape[0] < agg_keys.shape[0]:
+            return False
+
+        # other has less groups
+        if df["_size"].null_count() > 0:
+            return False
+
+        other_size = df["_size"].to_numpy()
+        return (
+            (self.size == 1)
+            | (other_size == 1)
+            | (self.size == other_size)
         ).all()
 
     def str_(self) -> str:
@@ -341,8 +388,16 @@ class RFGrouper(Grouper):
 class DFDatarNamespace:
     def __init__(self, df: pl.DataFrame):
         self._df = df
-        self._grouper = None
+        self._grouper: Grouper = None
         self._meta = {}
+        self._agg_keys = None
+
+    def copy(self, copy_meta=True):
+        """Copy the tibble"""
+        out = self._df.clone()
+        if copy_meta:
+            out.datar._meta = self._meta.copy()
+        return out
 
     def update_from(self, df: pl.DataFrame) -> None:
         self._grouper = df.datar.grouper
@@ -361,6 +416,65 @@ class DFDatarNamespace:
     def rowwise(self, *cols: str) -> pl.DataFrame:
         out = TibbleRowwise(self._df)
         out.datar._grouper = RFGrouper(self._df, list(cols))
+        return out
+
+    def regroup(
+        self,
+        new_sizes: int | Grouper | np.ndarray | pl.DataFrame,
+    ) -> TibbleGrouped:
+        """Regroup a grouped data frame if any group with a size 1 and
+        new size > 1
+
+        Args:
+            new_sizes: The new sizes of each group. Could be
+                - an integer, meaning all groups are broadcasted to this size
+                    and then regroup
+                - a Grouper, meaning the new sizes are the sizes of the
+                    groups, and then regroup
+                - a numpy array, meaning the new sizes are the sizes of the
+                    groups, and then regroup
+                - a data frame, expecting an agg_keys data frame, with group
+                    vars and _size columns. The _size column is used as the
+                    new sizes of each group, and then regroup
+        """
+        if not isinstance(self._df, TibbleGrouped):
+            raise ValueError("Can only regroup a grouped data frame")
+
+        if isinstance(new_sizes, Grouper):
+            new_sizes = self._grouper.keys.join(
+                new_sizes.rows_size,
+                how="left",
+                on=self._grouper.vars,
+            ).select("_size").to_series()
+        elif isinstance(new_sizes, pl.DataFrame):
+            new_sizes = self._grouper.keys.join(
+                new_sizes,
+                how="left",
+                on=self._grouper.vars,
+            ).select("_size").to_series()
+        elif is_scalar(new_sizes):
+            new_sizes = [new_sizes]
+
+        broadcasted_idx = self._grouper.rows_size.with_column(
+            pl.Series("_new_size", new_sizes)
+        ).select(
+            pl
+            .when(pl.col("_size") == 1)
+            .then(pl.col("_rows").arr.first().repeat_by("_new_size"))
+            .otherwise(pl.col("_rows"))
+            .explode()
+            .sort()
+            .alias("broadcasted_idx"),
+        ).to_series()
+
+        if broadcasted_idx.is_unique().all():
+            return self._df
+
+        out = self._df[broadcasted_idx, :].datar.group_by(
+            *self._grouper.vars,
+            sort=self._grouper.sort,
+        )
+        out.datar.meta["broadcasted"] = True
         return out
 
     def ungroup(self, inplace: bool = False) -> pl.DataFrame:
@@ -384,12 +498,36 @@ class DFDatarNamespace:
     def grouper(self) -> Grouper:
         return self._grouper
 
+    @property
+    def agg_keys(self) -> pl.DataFrame:
+        return self._agg_keys
+
+    def as_agg(
+        self,
+        grouper: Grouper | pl.DataFrame,
+        sizes: int | Sequence[int] | np.ndarray = 1,
+    ) -> TibbleAgg:
+        keys = grouper.keys if isinstance(grouper, Grouper) else grouper
+        if self._df.shape[0] != keys.shape[0]:
+            raise ValueError(
+                f"The numbers of rows of the frame ({self._df.shape[0]}) and "
+                f"the grouper keys ({keys.shape[0]}) must be the same"
+            )
+
+        if is_scalar(sizes):
+            sizes = [sizes]
+        out = TibbleAgg(self._df)
+        out.datar._agg_keys = keys.with_column(pl.Series("_size", sizes))
+        return out
+
 
 @pl.api.register_series_namespace("datar")
 class SeriesDatarNamespace:
     def __init__(self, series: pl.Series):
         self._series = series
-        self._grouper = None
+        self._grouper: Grouper = None
+        self._meta = {}
+        self._agg_keys: pl.DataFrame = None
 
     @property
     def grouper(self) -> bool:
@@ -399,6 +537,38 @@ class SeriesDatarNamespace:
     def grouper(self, grouper: Grouper):
         self._grouper = grouper
 
+    @property
+    def meta(self) -> Mapping[str, Any]:
+        return self._meta
+
+    @meta.setter
+    def meta(self, value: Mapping[str, Any]):
+        self._meta = value
+
+    @property
+    def agg_keys(self) -> pl.DataFrame:
+        return self._agg_keys
+
+    def as_agg(
+        self,
+        grouper: Grouper | pl.DataFrame,
+        sizes: int | Sequence[int] | np.ndarray = 1,
+    ) -> SeriesAgg:
+        keys = grouper.keys if isinstance(grouper, Grouper) else grouper
+        if is_scalar(sizes):
+            sizes = np.ones(keys.shape[0], dtype=int)
+
+        if self._series.shape[0] != sum(sizes):
+            raise ValueError(
+                f"The series length ({self._series.shape[0]}) and the total "
+                f"group sizes ({sum(sizes)}) must be the same"
+            )
+
+        out = SeriesAgg(self._series.name, self._series)
+        out.datar._agg_keys = keys.with_column(pl.Series("_size", sizes))
+        return out
+
     def ungroup(self) -> pl.Series:
         self._grouper = None
+        self._agg_keys = None
         return self._series
