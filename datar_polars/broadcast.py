@@ -168,7 +168,6 @@ def _(
             # No need to broadcast the base
             return base
 
-
         # Broadcast size-1 groups in base
         return base.datar.regroup(value.datar.grouper)
 
@@ -248,7 +247,7 @@ def _(
 def broadcast_to(
     value,
     size: int | Grouper,
-) -> pl.Series:
+) -> Any:
     """Broastcast value to expected dimension, the result is a series with
     the given index
 
@@ -275,9 +274,6 @@ def broadcast_to(
         return value[0]
 
     if isinstance(size, int):
-        if len(value) == 0:
-            return pl.Series(value)
-
         if len(value) != size:
             raise ValueError(
                 f"Can't broadcast a {len(value)}-size object to {size}."
@@ -285,17 +281,21 @@ def broadcast_to(
 
         return pl.Series(value)
 
-    gsizes = size.size
-    # if gsizes.size == 0:
-    #     # Do whatever, polars will raise ShapeError
-    #     return pl.Series(value)
+    if len(size.size) == 0 and len(value) == 0:
+        return pl.Series(value)
 
-    if np.unique(gsizes).size != 1 or gsizes[0] != len(value):
+    if np.unique(size.size).size != 1 or size.size[0] != len(value):
         raise ValueError(
-            f"Can't broadcast a {len(value)}-size object to {gsizes}."
+            f"Can't broadcast a {len(value)}-size object "
+            f"to {np.unique(size.size)}."
         )
 
-    return SeriesGrouped(np.tile(value, size.n), grouper=size)
+    out = np.empty(size.size.sum(), dtype=object)
+    for row in size.rows:
+        out[row] = value
+
+    # Let pl.Series handle the dtype
+    return SeriesGrouped(out.tolist(), grouper=size)
 
 
 # @broadcast_to.register(Factor)
@@ -330,169 +330,144 @@ def broadcast_to(
 #     return Series(value, index=idx).reindex(index)
 
 
-# @broadcast_to.register(NDFrame)
-# def _(
-#     value: NDFrame,
-#     index: Index,
-#     grouper: Grouper = None,
-# ) -> Union[Tibble, Series]:
-#     """Broadcast series/dataframe"""
-#     if value.index is index:
-#         # if it is the same index
-#         # e.g. transform results
-#         return value
+@broadcast_to.register(pl.Series)
+def _(
+    value: pl.Series,
+    size: int | Grouper,
+) -> pl.Series:
+    """Broadcast series/dataframe"""
 
-#     if not grouper:
-#         # recycle row-1 series/frame
-#         if value.index.size == 1 and value.index[0] == 0:
-#             value = value.reindex([0] * index.size)
-#             value.index = index
+    if isinstance(size, int):
+        # recycle row-1 series/frame
+        if value.shape[0] == 1:
+            return value[[0] * size]
 
-#         # empty frame get recycled
-#         if isinstance(value, DataFrame) and value.index.size == 0:
-#             value.index = index
+        if value.shape[0] == size:
+            return value
 
-#         # if not value.index.equals(index):
-#         if not value.index.equals(index) and frozenset(
-#             value.index
-#         ) != frozenset(index):
-#             raise ValueError("Value has incompatible index.")
+        raise ValueError(
+            f"Can't broadcast a {value.shape[0]}-size object to {size}."
+        )
 
-#         if isinstance(value, Series):
-#             return Series(value, name=value.name, index=index)
+    usizes = unique(size.size)
+    if usizes.size == 0:
+        return value
 
-#         return Tibble(value, index=index)
+    if usizes.size != 1 or usizes[0] != value.shape[0]:
+        raise ValueError(
+            f"Can't broadcast a {value.shape[0]}-size object to {usizes}."
+        )
 
-#     # now target is grouped and the value's index is overlapping with the
-#     # grouper's index
-#     # This is typically an aggregated result to the orignal structure
-#     # For example:  f.x.mean() / f.x
-#     if _agg_result_compatible(value.index, grouper):
+    if value.shape[0] == 1:
+        value = value[[0] * usizes[0]]
 
-#         if isinstance(value, Series):
-#             out = Series(
-#                 value,
-#                 index=grouper.result_index.take(grouper.group_info[0]),
-#                 name=value.name,
-#                 copy=False,
-#             )
-#         else:  # DataFrame
-#             out = Tibble(
-#                 value,
-#                 index=grouper.result_index.take(grouper.group_info[0]),
-#                 copy=False,
-#             )
-
-#         out.index = index
-#         return out
-
-#     if value.index.equals(index):
-#         return value
-
-#     raise ValueError("Incompatible value to recycle.")
+    value = value[np.tile(np.arange(value.shape[0]), usizes[0])]
+    value = value[np.concatenate(size.rows)]
+    return SeriesGrouped(value, grouper=size)
 
 
-# @broadcast_to.register(GroupBy)
-# def _(
-#     value: GroupBy,
-#     index: Index,
-#     grouper: Grouper = None,
-# ) -> Union[Series, Tibble]:
-#     """Broadcast pandas grouped object"""
-#     if not grouper:
-#         raise ValueError(
-#             "Can't broadcast grouped object to a non-grouped object."
-#         )
+@broadcast_to.register(pl.DataFrame)
+def _(
+    value: pl.DataFrame,
+    size: int | Grouper,
+) -> pl.DataFrame:
+    """Broadcast series/dataframe"""
 
-#     # Compatibility has been checked in _broadcast_base
-#     if isinstance(value, SeriesGrouped):
-#         if np.array_equal(grouper.group_info[0], value.grouper.group_info[0]):
-#             return Series(
-#                 get_obj(value).values, index=index, name=get_obj(value).name
-#             )
+    if isinstance(size, int):
+        # recycle row-1 series/frame
+        if value.shape[0] == 1:
+            return value[[0] * size, :]
 
-#         # broadcast size-one groups and
-#         # realign the index
-#         revalue = _realign_indexes(value, grouper)
-#         return Series(revalue, index=index, name=get_obj(value).name)
+        if value.shape[0] == size:
+            return value
 
-#     if np.array_equal(grouper.group_info[0], value.grouper.group_info[0]):
-#         return Tibble(
-#             get_obj(value).values, index=index, columns=get_obj(value).columns
-#         )
+        raise ValueError(
+            f"Can't broadcast a {value.shape[0]}-size object to {size}."
+        )
 
-#     # realign the index
-#     revalue = _realign_indexes(value, grouper)
-#     return Tibble(revalue, index=index, columns=get_obj(value).columns)
+    usizes = unique(size.size)
+    if usizes.size == 0:
+        return value
 
+    if usizes.size != 1 or usizes[0] != value.shape[0]:
+        raise ValueError(
+            f"Can't broadcast a {value.shape[0]}-size object to {usizes}."
+        )
 
-# @broadcast_to.register(TibbleGrouped)
-# def _(
-#     value: TibbleGrouped,
-#     index: Index,
-#     grouper: Grouper = None,
-# ) -> Tibble:
-#     """Broadcast TibbleGrouped object"""
-#     return broadcast_to(
-#         value._datar["grouped"],
-#         index=index,
-#         grouper=grouper,
-#     )
+    if value.shape[0] == 1:
+        value = value[[0] * usizes[0], :]
+
+    value = value[np.tile(np.arange(value.shape[0]), usizes[0]), :]
+    value = value[np.concatenate(size.rows), :]
+    out = TibbleGrouped(value)
+    out.datar._grouper = size
+    return out
 
 
-# @singledispatch
-# def _get_index_grouper(value) -> Tuple[Index, Grouper]:
-#     return None, None
+@broadcast_to.register(SeriesAgg)
+@broadcast_to.register(TibbleAgg)
+def _(
+    value: SeriesAgg | TibbleAgg,
+    size: int | Grouper,
+) -> SeriesGrouped | TibbleGrouped:
+    """Broadcast series/dataframe"""
+    return value.broadcast_to(size)
 
 
-# @_get_index_grouper.register(TibbleGrouped)
-# def _(value):
-#     return value.index, value._datar["grouped"].grouper
+@broadcast_to.register(SeriesGrouped)
+def _(
+    value: SeriesGrouped,
+    size: int | Grouper,
+) -> SeriesGrouped:
+    """Broadcast pandas grouped object"""
+    out = value.to_frame(name=value.name).datar.regroup(size)
+    return out[value.name]
 
 
-# @_get_index_grouper.register(NDFrame)
-# def _(value):
-#     return value.index, None
+@broadcast_to.register(TibbleGrouped)
+def _(
+    value: TibbleGrouped,
+    size: int | Grouper,
+) -> TibbleGrouped:
+    """Broadcast pandas grouped object"""
+    return value.datar.regroup(size)
 
 
-# @_get_index_grouper.register(GroupBy)
-# def _(value):
-#     return get_obj(value).index, value.grouper
+@singledispatch
+def _type_priority(value) -> int:
+    """Defines who should be broadcasted to who"""
+    return -1
 
 
-# @singledispatch
-# def _type_priority(value) -> int:
-#     return -1
+@_type_priority.register(pl.Series)
+def _(value):
+    return 5
 
 
-# @_type_priority.register(GroupBy)
-# def _(value):
-#     return 10
+@_type_priority.register(pl.DataFrame)
+def _(value):
+    """Series should be broadcasted to DataFrame"""
+    return 6
 
 
-# @_type_priority.register(NDFrame)
-# def _(value):
-#     return 5
+@_type_priority.register(SeriesAgg)
+def _(value):
+    return 7
 
 
-# @_type_priority.register(TibbleGrouped)
-# def _(value):
-#     return 10
+@_type_priority.register(TibbleAgg)
+def _(value):
+    return 8
 
 
-# @singledispatch
-# def _ungroup(value):
-#     return value
+@_type_priority.register(SeriesGrouped)
+def _(value):
+    return 10
 
 
-# @_ungroup.register(GroupBy)
-# def _(value):
-#     return get_obj(value)
-
-
-# @_ungroup.register(TibbleGrouped)
-# def _(value):
-#     return value._datar["grouped"].obj
+@_type_priority.register(TibbleGrouped)
+def _(value):
+    return 11
 
 
 # @singledispatch

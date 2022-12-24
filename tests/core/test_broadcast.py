@@ -2,9 +2,10 @@ import pytest
 
 # from datar.base import factor, c
 import polars as pl
+from polars.testing import assert_frame_equal
 from datar.tibble import tibble
 from datar_polars.extended import GFGrouper
-from datar_polars.tibble import TibbleGrouped, TibbleRowwise
+from datar_polars.tibble import TibbleGrouped, TibbleRowwise, SeriesGrouped
 from datar_polars.broadcast import (
     _broadcast_base,
     # broadcast2,
@@ -245,68 +246,82 @@ def test_broadcast_to_scalar():
 #     assert_iterable_equal(out, ["a", "b"] * 2)
 
 
-# def test_broadcast_to_arrays_ndframe():
-#     with pytest.raises(ValueError, match=r"Length of values \(0\)"):
-#         broadcast_to([], Index([1, 2]))
+def test_broadcast_to_arrays_ndframe():
+    with pytest.raises(ValueError, match=r"Can't broadcast a 0-size object"):
+        broadcast_to([], 3)
 
-#     with pytest.raises(ValueError, match=r"Length of values \(3\)"):
-#         broadcast_to([1, 2, 3], Index([1, 2]))
+    with pytest.raises(ValueError, match=r"Can't broadcast a 3-size"):
+        broadcast_to([1, 2, 3], 2)
 
-#     value = broadcast_to([1, 2], Index([1, 2]))
-#     assert value.index.tolist() == [1, 2]
+    value = broadcast_to([1, 2], 2)
+    assert_iterable_equal(value, [1, 2])
 
+    df = tibble(a=[1, 1, 3, 3]).datar.group_by("a")
+    value = broadcast_to([1, 2], df.datar.grouper)
+    assert isinstance(value, SeriesGrouped)
+    assert_iterable_equal(value, [1, 2, 1, 2])
 
-# def test_broadcast_to_arrays_groupby():
-#     df = tibble(x=[]).groupby("x")
-#     value = broadcast_to([], get_obj(df).index, df.grouper)
-#     assert value.size == 0
-
-#     df = tibble(x=[2, 1, 2, 1])
-#     df.index = [4, 5, 6, 7]
-#     df = df.groupby("x", sort=False)
-#     value = broadcast_to(["a", "b"], get_obj(df).index, df.grouper)
-#     assert value.tolist() == ["a", "a", "b", "b"]
+    df = tibble(a=[1, 1, 3]).datar.group_by("a")
+    with pytest.raises(ValueError, match=r"Can't broadcast a 2-size"):
+        broadcast_to([1, 2], df.datar.grouper)
 
 
-# def test_broadcast_to_ndframe_ndframe():
-#     df = tibble(x=[1, 2, 3])
-#     value = Series([1, 2, 3], index=[0, 1, 2])
-#     out = broadcast_to(value, df.index)
-#     assert_iterable_equal(out, [1, 2, 3])
+def test_broadcast_to_arrays_groupby():
+    df = tibble(x=[]).datar.group_by("x")
+    value = broadcast_to([], df.datar.grouper)
+    assert len(value) == 0
 
-#     out = broadcast_to(value.to_frame(name="x"), df.index)
-#     assert_iterable_equal(out.x, [1, 2, 3])
-
-
-# def test_broadcast_to_ndframe_groupby():
-#     df = tibble(x=[1, 2, 2, 1, 1, 2]).groupby("x", sort=True)
-#     value = Series([8, 10], index=[1, 2])
-#     value.index.name = "x"
-#     out = broadcast_to(value, get_obj(df).index, df.grouper)
-#     assert out.tolist() == [8, 10, 10, 8, 8, 10]
-
-#     out = broadcast_to(value.to_frame(name="x"), get_obj(df).index, df.grouper)
-#     assert out.x.tolist() == [8, 10, 10, 8, 8, 10]
+    df = tibble(x=[2, 1, 2, 1])
+    df = df.datar.group_by("x")
+    value = broadcast_to(["a", "b"], df.datar.grouper)
+    assert_iterable_equal(value, ["a", "a", "b", "b"])
 
 
-# def test_broadcast_to_groupby_ndframe():
-#     df = tibble(x=[1, 2, 2, 1, 1, 2]).groupby("x")
-#     with pytest.raises(ValueError, match=r"Can't broadcast grouped"):
-#         broadcast_to(df, get_obj(df).index)
+def test_broadcast_to_ndframe_ndframe():
+    value = pl.Series([1, 2, 3])
+    out = broadcast_to(value, 3)
+    assert_iterable_equal(out, [1, 2, 3])
 
-#     out = broadcast_to(df.x, get_obj(df).index, df.grouper)
-#     assert_iterable_equal(out, get_obj(df.x))
+    out = broadcast_to(value.to_frame(name="x"), 3)
+    assert_iterable_equal(out['x'], [1, 2, 3])
 
-#     out = broadcast_to(df, get_obj(df).index, df.grouper)
-#     assert_frame_equal(out, get_obj(df))
 
-#     df = tibble(x=[1, 2, 2, 1, 1, 2]).group_by("x")
-#     out = broadcast_to(df, df.index, df._datar["grouped"].grouper)
-#     assert_frame_equal(df, out)
+def test_broadcast_to_ndframe_groupby():
+    df = tibble(x=[1, 2, 2, 1, 1, 2, 3, 3, 3]).datar.group_by("x")
+    value = pl.Series([8, 9, 10])
+    out = broadcast_to(value, df.datar.grouper)
+    assert_iterable_equal(out, [8, 8, 9, 9, 10, 10, 8, 9, 10])
 
-#     nn = df.x.grouper.size().to_frame("size").reset_index().groupby("x")
-#     out = broadcast_to(nn, df.index, df._datar["grouped"].grouper)
-#     assert_iterable_equal(out["size"], [3] * 6)
+    out = broadcast_to(value.to_frame(name="x"), df.datar.grouper)
+    assert_iterable_equal(out['x'], [8, 8, 9, 9, 10, 10, 8, 9, 10])
+
+
+def test_broadcast_to_agg_groupby():
+    df = tibble(
+        x=[1, 2, 2, 1, 1, 2, 3, 3, 3],
+        y=[1, 2, 3, 4, 5, 6, 7, 8, 9],
+    ).datar.group_by("x")
+    value = df['y'].sum()
+    out = broadcast_to(value, df.datar.grouper)
+    assert isinstance(out, SeriesGrouped)
+    assert_iterable_equal(out, [10, 11, 11, 10, 10, 11, 24, 24, 24])
+
+    out = broadcast_to(value.to_frame(name="y"), df.datar.grouper)
+    assert_iterable_equal(out['y'], [10, 11, 11, 10, 10, 11, 24, 24, 24])
+
+
+def test_broadcast_to_groupby_ndframe():
+    df = tibble(x=[1, 2, 2, 1, 1, 2], y=[1, 2, 3, 4, 5, 6]).datar.group_by("x")
+    out = broadcast_to(df['x'], df.datar.grouper)
+    assert_iterable_equal(out, df['x'])
+
+    out = broadcast_to(df, df.datar.grouper)
+    assert_frame_equal(out, df)
+
+    nn = df['y'].sum()
+    nn = broadcast_to(nn, df.datar.grouper)
+    assert isinstance(nn, SeriesGrouped)
+    assert_iterable_equal(nn, [10, 11, 11, 10, 10, 11])
 
 
 # def test_broadcast2():

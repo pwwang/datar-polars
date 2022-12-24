@@ -6,7 +6,7 @@ import numpy as np
 import polars as pl
 from polars.internals.dataframe.groupby import GroupBy
 
-from .tibble import Tibble, TibbleGrouped, TibbleRowwise, SeriesAgg, TibbleAgg
+from .tibble import SeriesGrouped, Tibble, TibbleGrouped, TibbleRowwise, SeriesAgg, TibbleAgg
 from .utils import is_scalar
 
 

@@ -6,7 +6,16 @@ from itertools import chain
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 import numpy as np
-from polars import DataFrame, DataType, Series, Expr, lit, all as pl_all
+from polars import (
+    DataFrame,
+    DataType,
+    Series,
+    Expr,
+    concat_list,
+    all as pl_all,
+    col as pl_col,
+    lit,
+)
 from polars.exceptions import NotFoundError
 from pipda import evaluate_expr
 from datar.core.names import repair_names
@@ -32,13 +41,15 @@ def _keep_ns(method: Callable) -> Callable:
     return wrapper
 
 
-def _to_agg(method: Callable) -> Callable:
+def _series_grouped_agg(method: Callable) -> Callable:
     """Decorator to make sure grouped return SeriesAgg or TableAgg object"""
 
     @wraps(method)
     def wrapper(self, *args, **kwargs):
-        out = method(self, *args, **kwargs)
-        return out.as_agg(self.datar.grouper)
+        col = pl_col(self.name)
+        agg = getattr(col, method.__name__)
+        out = self.datar.grouper.gf.agg([agg(*args, **kwargs)]).to_series(-1)
+        return out.datar.as_agg(self.datar.grouper)
 
     return wrapper
 
@@ -200,16 +211,17 @@ class Aggregated(ABC):
         new_sizes: int | Sequence[int] | np.ndarray | Grouper,
     ) -> np.ndarray:
         """Broadcast the series to a new sizes"""
-        if is_scalar(new_sizes):
+        if isinstance(new_sizes, int):
             new_sizes = [new_sizes]
 
+        from .extended import Grouper
         if isinstance(new_sizes, Grouper):
             # agg_keys:
             #  *gvars, _size
             df = self.datar.agg_keys.join(
                 new_sizes.rows_size.rename({"_size": "_new_sizes"}),
                 how="left",
-                on=self.datar.agg_keys.columns,
+                on=self.datar.agg_keys.columns[:-1],
             )
         else:
             df = self.datar.agg_keys.with_column(
@@ -219,21 +231,39 @@ class Aggregated(ABC):
         # df
         # *gvars, _size, _new_sizes
         # get the broadcasted indexes
-        broadcasted_indexes = []
-        index = 0
-        for size, new_size in zip(df["_size"], df["_new_sizes"]):
-            if size != 1 and size != new_size:
-                raise ValueError(
-                    "Cannot broadcast to different sizes"
-                )
-            indices = range(index, index + size)
-            if size == 1:
-                indices = indices * new_size
-            # else:  # size == new_size
-            broadcasted_indexes.extend(indices)
-            index += size
+        indexes_df = (
+            df
+            .lazy()
+            .with_columns(
+                [
+                    (pl_col("_new_sizes") / pl_col("_size"))
+                    .cast(int)
+                    .alias("_factor"),
+                    pl_col("_size").cumsum().alias("_index_end"),
+                ]
+            )
+            .with_column(
+                (pl_col("_index_end") - pl_col("_size")).alias("_index_start")
+            )
+            .with_column(
+                concat_list(pl_col(["_index_start", "_index_end"]))
+                .apply(lambda l: list(range(*l)))
+                .alias("_indexes")
+            )
+            .collect()
+        )
 
-        return broadcasted_indexes
+        indexes = np.concatenate(
+            [
+                list(idx) * fct
+                for idx, fct in zip(
+                    indexes_df["_indexes"],
+                    indexes_df["_factor"],
+                )
+            ]
+        )
+
+        return indexes.take(np.concatenate(df["_rows"]))
 
     @abstractmethod
     def broadcast_to(
@@ -243,17 +273,31 @@ class Aggregated(ABC):
         ...
 
 
+class Transformed(Aggregated, ABC):
+    ...
+
+
 class SeriesAgg(Series, Aggregated):
 
     def broadcast_to(
         self,
         new_sizes: int | Sequence[int] | np.ndarray | Grouper,
     ) -> SeriesBase | Tibble:
+        from .extended import Grouper
         broadcasted_indexes = self._get_broadcasted_indexes(new_sizes)
-        out = self[broadcasted_indexes]
+        out = self.take(broadcasted_indexes)
         if isinstance(new_sizes, Grouper):
             out = SeriesGrouped(self.name, out, grouper=new_sizes)
         return out
+
+    def to_frame(self, *args, **kwargs) -> TibbleAgg:
+        out = TibbleAgg(super().to_frame(*args, **kwargs))
+        out.datar._agg_keys = self.datar._agg_keys
+        return out
+
+
+class SeriesTransformed(SeriesAgg):
+    ...
 
 
 class TibbleAgg(Tibble, Aggregated):
@@ -262,12 +306,18 @@ class TibbleAgg(Tibble, Aggregated):
         self,
         new_sizes: int | Sequence[int] | np.ndarray | Grouper,
     ) -> SeriesBase | Tibble:
+        from .extended import Grouper
+
         broadcasted_indexes = self._get_broadcasted_indexes(new_sizes)
         out = self[broadcasted_indexes, :]
         if isinstance(new_sizes, Grouper):
             out = TibbleGrouped(out)
             out.datar._grouper = new_sizes
         return out
+
+
+class TibbleTransformed(TibbleAgg):
+    ...
 
 
 class SeriesBase(Series, ABC):
@@ -280,16 +330,21 @@ class SeriesBase(Series, ABC):
 class SeriesGrouped(SeriesBase):
 
     # make sure these methods return SeriesAgg
-    all = _to_agg(Series.all)
-    any = _to_agg(Series.any)
-    max = _to_agg(Series.max)
-    min = _to_agg(Series.min)
-    mean = _to_agg(Series.mean)
-    median = _to_agg(Series.median)
-    nan_max = _to_agg(Series.nan_max)
-    nan_min = _to_agg(Series.nan_min)
-    null_count = _to_agg(Series.null_count)
-    sum = _to_agg(Series.sum)
+    all = _series_grouped_agg(Series.all)
+    any = _series_grouped_agg(Series.any)
+    max = _series_grouped_agg(Series.max)
+    min = _series_grouped_agg(Series.min)
+    mean = _series_grouped_agg(Series.mean)
+    median = _series_grouped_agg(Series.median)
+    nan_max = _series_grouped_agg(Series.nan_max)
+    nan_min = _series_grouped_agg(Series.nan_min)
+    null_count = _series_grouped_agg(Series.null_count)
+    sum = _series_grouped_agg(Series.sum)
+
+    def to_frame(self, *args, **kwargs) -> TibbleGrouped:
+        out = TibbleGrouped(super().to_frame(*args, **kwargs))
+        out.datar._grouper = self.datar.grouper
+        return out
 
 
 class SeriesRowwise(SeriesBase):
