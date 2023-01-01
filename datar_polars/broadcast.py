@@ -471,23 +471,44 @@ def _(value):
 
 
 # @singledispatch
-# def broadcast2(left, right) -> Tuple[Any, Any, Grouper, bool]:
+# def _get_size_or_grouper(value) -> int | Grouper:
+#     return None
+
+
+# @_get_size_or_grouper.register(TibbleGrouped)
+# @_get_size_or_grouper.register(TibbleGrouped)
+# def _(value: TibbleGrouped) -> int | Grouper:
+#     return value.datar.grouper
+
+
+# @_get_size_or_grouper.register(NDFrame)
+# def _(value):
+#     return value.index, None
+
+
+# @_get_size_or_grouper.register(GroupBy)
+# def _(value):
+#     return get_obj(value).index, value.grouper
+
+
+# @singledispatch
+# def broadcast2(left, right) -> Tuple[Any, Any, Grouper]:
 #     """Broadcast 2 values for operators"""
 #     left_pri = _type_priority(left)
 #     right_pri = _type_priority(right)
 #     if left_pri == right_pri == -1:
-#         return left, right, None, False
+#         return left, right, None
 
 #     if left_pri > right_pri:
 #         left = _broadcast_base(right, left)
-#         index, grouper = _get_index_grouper(left)
+#         index, grouper = _get_size_or_grouper(left)
 #         is_rowwise = isinstance(left, TibbleRowwise) or getattr(
 #             left, "is_rowwise", False
 #         )
 #         right = broadcast_to(right, index, grouper)
 #     else:
 #         right = _broadcast_base(left, right)
-#         index, grouper = _get_index_grouper(right)
+#         index, grouper = _get_size_or_grouper(right)
 #         is_rowwise = isinstance(right, TibbleRowwise) or getattr(
 #             right, "is_rowwise", False
 #         )
