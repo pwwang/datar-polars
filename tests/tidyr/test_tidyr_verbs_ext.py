@@ -42,7 +42,9 @@ def test_drop_na_groups_preserved():
     df = tibble(g=["A", "A", "B"], x=[1, 2, None], y=["a", None, "b"])
     gdf = group_by(df, f.g)
     out = drop_na(gdf, f.y)
-    assert group_vars(out) == group_vars(gdf)
+    assert group_vars(out, __ast_fallback="normal") == group_vars(
+        gdf, __ast_fallback="normal"
+    )
 
 
 # ---- replace_na ---------------------------------------------------------

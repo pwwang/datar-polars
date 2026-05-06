@@ -186,7 +186,7 @@ class TestGroupByDropDefault:
         df = _df({"x": [1, 2]})
         gf = df >> group_by(f.x)
         assert group_by_drop_default(
-            gf,
+            gf, __ast_fallback="normal",
         )
 
     def test_drop_default_false(self):

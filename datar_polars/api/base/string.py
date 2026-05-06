@@ -395,7 +395,7 @@ def _strsplit_expr(
     use_bytes: bool = False,
 ) -> pl.Expr:
     """Split strings by delimiter."""
-    return x.str.split(by=str(split), literal=fixed)
+    return x.str.split(by=str(split))
 
 
 @strsplit.register(object, context=Context.EVAL, backend="polars")
@@ -411,7 +411,7 @@ def _strsplit_obj(
         result = _strsplit_obj(pl.Series(x), split, fixed, perl, use_bytes)
         return result.to_list() if isinstance(result, pl.Series) else result
     if isinstance(x, pl.Series):
-        return x.str.split(by=str(split), literal=fixed)
+        return x.str.split(by=str(split))
     return str(x).split(str(split))
 
 

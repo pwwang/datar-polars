@@ -257,16 +257,16 @@ def _signif_obj(x: Any, digits: int = 6) -> Any:
 @trunc.register(pl.Expr, context=Context.EVAL, backend="polars")
 def _trunc_expr(x: pl.Expr) -> pl.Expr:
     """Truncate an expression toward zero."""
-    return x.truncate()
+    return x.sign() * x.abs().floor()
 
 
 @trunc.register(object, context=Context.EVAL, backend="polars")
 def _trunc_obj(x: Any) -> Any:
     """Truncate a scalar, Series, or array toward zero."""
     if isinstance(x, pl.Series):
-        return x.truncate()
+        return x.sign() * x.abs().floor()
     if isinstance(x, pl.Expr):
-        return x.truncate()
+        return x.sign() * x.abs().floor()
     if hasattr(x, "__iter__") and not isinstance(x, (str, bytes)):
         import math
         return [math.trunc(v) for v in x]
@@ -816,9 +816,9 @@ def _quantile_obj(
     if isinstance(x, pl.Series):
         if single:
             probs = [probs]
-        result = x.quantile(probs, interpolation="linear")
+        result = [x.quantile(q, interpolation="linear") for q in probs]
         if single:
-            return result[0] if len(result) > 0 else None
+            return result[0]
         return result
     if isinstance(x, pl.Expr):
         return _quantile_expr(x, probs, na_rm, names, type_, digits)
