@@ -1,0 +1,1 @@
+# ![mkapi](datar_polars.api.base.table|code|)

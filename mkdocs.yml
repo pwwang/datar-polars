@@ -1,0 +1,129 @@
+site_name: datar-polars
+site_description: Polars backend for the datar framework — dplyr-style data manipulation in Python
+repo_url: https://github.com/pwwang/datar-polars
+repo_name: pwwang/datar-polars
+
+theme:
+  name: material
+  palette:
+    primary: indigo
+    accent: indigo
+  features:
+    - navigation.sections
+    - navigation.expand
+    - search.suggest
+    - content.code.copy
+
+extra_css:
+  - stylesheets/extra.css
+
+exclude_docs: |
+  examples/notebooks/nb_helpers.py
+
+plugins:
+  - search
+  - mkapi:
+      src_dirs: [.]
+      filters: []
+  - mkdocs-jupyter:
+      include_source: true
+      execute: true
+      ignore_h1_titles: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.details
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Tibble API: mkapi/api-tibble/./datar_polars.tibble
+  - dplyr API: mkapi/api-dplyr/./datar_polars.api.dplyr
+  - base API: mkapi/api-base/./datar_polars.api.base
+  - tidyr API: mkapi/api-tidyr/./datar_polars.api.tidyr
+  - forcats API: mkapi/api-forcats/./datar_polars.api.forcats
+  - Misc API: mkapi/api-misc/./datar_polars.api.misc
+  - Examples:
+      - examples/index.md
+      - Getting Started:
+          - README: examples/notebooks/readme.ipynb
+      - dplyr:
+          - across: examples/notebooks/across.ipynb
+          - arrange: examples/notebooks/arrange.ipynb
+          - bind: examples/notebooks/bind.ipynb
+          - case_when: examples/notebooks/case_when.ipynb
+          - coalesce: examples/notebooks/coalesce.ipynb
+          - context: examples/notebooks/context.ipynb
+          - count: examples/notebooks/count.ipynb
+          - cumall: examples/notebooks/cumall.ipynb
+          - desc: examples/notebooks/desc.ipynb
+          - distinct: examples/notebooks/distinct.ipynb
+          - filter: examples/notebooks/filter.ipynb
+          - group_by: examples/notebooks/group_by.ipynb
+          - group_map: examples/notebooks/group_map.ipynb
+          - group_split: examples/notebooks/group_split.ipynb
+          - group_trim: examples/notebooks/group_trim.ipynb
+          - lead-lag: examples/notebooks/lead-lag.ipynb
+          - mutate: examples/notebooks/mutate.ipynb
+          - n_distinct: examples/notebooks/n_distinct.ipynb
+          - nth: examples/notebooks/nth.ipynb
+          - pull: examples/notebooks/pull.ipynb
+          - ranking: examples/notebooks/ranking.ipynb
+          - recode: examples/notebooks/recode.ipynb
+          - reframe: examples/notebooks/reframe.ipynb
+          - relocate: examples/notebooks/relocate.ipynb
+          - rename: examples/notebooks/rename.ipynb
+          - row-wise: examples/notebooks/rowwise.ipynb
+          - rownames: examples/notebooks/rownames.ipynb
+          - select: examples/notebooks/select.ipynb
+          - slice: examples/notebooks/slice.ipynb
+          - summarise: examples/notebooks/summarise.ipynb
+          - with_groups: examples/notebooks/with_groups.ipynb
+      - Joins:
+          - mutate-joins: examples/notebooks/mutate-joins.ipynb
+          - filter-joins: examples/notebooks/filter-joins.ipynb
+          - nest-join: examples/notebooks/nest-join.ipynb
+      - tidyr:
+          - complete: examples/notebooks/complete.ipynb
+          - drop_na: examples/notebooks/drop_na.ipynb
+          - expand: examples/notebooks/expand.ipynb
+          - expand_grid: examples/notebooks/expand_grid.ipynb
+          - extract: examples/notebooks/extract.ipynb
+          - fill: examples/notebooks/fill.ipynb
+          - full_seq: examples/notebooks/full_seq.ipynb
+          - nest: examples/notebooks/nest.ipynb
+          - pack: examples/notebooks/pack.ipynb
+          - pivot_longer: examples/notebooks/pivot_longer.ipynb
+          - pivot_wider: examples/notebooks/pivot_wider.ipynb
+          - replace_na: examples/notebooks/replace_na.ipynb
+          - separate: examples/notebooks/separate.ipynb
+          - unite: examples/notebooks/unite.ipynb
+          - uncount: examples/notebooks/uncount.ipynb
+          - chop: examples/notebooks/chop.ipynb
+      - tibble:
+          - tibble: examples/notebooks/tibble.ipynb
+          - enframe: examples/notebooks/enframe.ipynb
+          - add_column: examples/notebooks/add_column.ipynb
+          - add_row: examples/notebooks/add_row.ipynb
+      - base:
+          - base-funs: examples/notebooks/base-funs.ipynb
+          - base-arithmetic: examples/notebooks/base-arithmetic.ipynb
+          - base: examples/notebooks/base.ipynb
+      - forcats:
+          - forcats_fct_multi: examples/notebooks/forcats_fct_multi.ipynb
+          - forcats_lvl_addrm: examples/notebooks/forcats_lvl_addrm.ipynb
+          - forcats_lvl_order: examples/notebooks/forcats_lvl_order.ipynb
+          - forcats_lvl_value: examples/notebooks/forcats_lvl_value.ipynb
+          - forcats_misc: examples/notebooks/forcats_misc.ipynb
+      - Sets & Comparisons:
+          - setops: examples/notebooks/setops.ipynb
+          - between: examples/notebooks/between.ipynb
+          - near: examples/notebooks/near.ipynb
+          - na_if: examples/notebooks/na_if.ipynb
+      - Other:
+          - rows: examples/notebooks/rows.ipynb
+          - other: examples/notebooks/other.ipynb
