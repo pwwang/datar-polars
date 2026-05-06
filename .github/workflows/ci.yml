@@ -13,10 +13,6 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
-        polars: [
-          "polars>=1.36,<2",
-          "polars",
-        ]
 
     steps:
       - uses: actions/checkout@v6
@@ -26,19 +22,16 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: |
-          uv sync --extra all
-          uv pip install -U "$POLARS"
-        env:
-          POLARS: ${{ matrix.polars }}
+          uv sync --all-extras
       - name: Show versions
         run: uv run python -c 'import datar; datar.get_versions()'
       - name: Test with pytest
-        run: uv run pytest tests/ --junitxml=junit/test-results-${{ matrix.python-version }}-${{ matrix.polars }}.xml
+        run: uv run pytest tests/ --junitxml=junit/test-results-${{ matrix.python-version }}.xml
       - name: Upload pytest test results
         uses: actions/upload-artifact@v7
         with:
-          name: pytest-results-${{ matrix.python-version }}-${{ matrix.polars }}
-          path: junit/test-results-${{ matrix.python-version }}-${{ matrix.polars }}.xml
+          name: pytest-results-${{ matrix.python-version }}
+          path: junit/test-results-${{ matrix.python-version }}.xml
         if: ${{ always() }}
 
   deploy:
