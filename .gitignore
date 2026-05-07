@@ -127,3 +127,4 @@ run_notebooks.py
 categorize_errors.py
 _test_setequal.py
 .venv
+docs/api-*/
