@@ -21,7 +21,9 @@ jobs:
           uv run python -m ipykernel install --user --name python --display-name python
           uv run python -m ipykernel install --user --name python3 --display-name python3
       - name: Build docs
-        run: uv run mkdocs build
+        run: |
+          cp README.md docs/index.md
+          uv run mkdocs build
         if: success()
       - name: Deploy docs
         run: uv run mkdocs gh-deploy --clean --force
