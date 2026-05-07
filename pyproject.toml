@@ -1,6 +1,6 @@
 [project]
 name = "datar-polars"
-version = "0.1.0"
+dynamic = ["version"]
 description = "The polars backend for datar"
 authors = [{name = "pwwang", email = "pwwang@pwwang.com"}]
 license = {text = "MIT"}
@@ -10,6 +10,9 @@ dependencies = [
     "polars>=1.36",
     "numpy",
 ]
+
+[tool.hatch.version]
+path = "datar_polars/version.py"
 
 [project.entry-points.datar]
 polars = "datar_polars:plugin"
