@@ -58,6 +58,7 @@ All operations build lazy [polars][1] query plans. Computation is deferred until
 
 ## Links
 
+- [datar-polars documentation][9]
 - [datar documentation][10]
 - [datar on GitHub][2]
 - [polars documentation][1]
