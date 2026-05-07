@@ -11,7 +11,7 @@ from typing import Any, Mapping, Sequence, Tuple
 import polars as pl
 
 from datar.core.utils import logger
-from datar.dplyr import select
+from datar.apis.dplyr import select
 
 from ...contexts import Context
 from ...tibble import (

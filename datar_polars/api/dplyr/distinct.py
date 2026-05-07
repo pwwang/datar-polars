@@ -9,8 +9,7 @@ from typing import Any
 
 import polars as pl
 
-from datar.dplyr import distinct, mutate
-from datar.apis.dplyr import n_distinct
+from datar.apis.dplyr import distinct, mutate, n_distinct
 
 from ...contexts import Context
 from ...tibble import Tibble, LazyTibble, reconstruct_tibble

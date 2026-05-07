@@ -10,7 +10,7 @@ from typing import Any
 import polars as pl
 from pipda import evaluate_expr
 
-from datar.dplyr import arrange
+from datar.apis.dplyr import arrange
 
 from ...contexts import Context
 from ...tibble import (

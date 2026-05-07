@@ -12,7 +12,7 @@ from polars.exceptions import ColumnNotFoundError
 from pipda import evaluate_expr
 
 from datar.core.utils import arg_match, logger
-from datar.dplyr import summarise, reframe
+from datar.apis.dplyr import summarise, reframe
 
 from ...contexts import Context
 from ...tibble import Tibble, LazyTibble, reconstruct_tibble

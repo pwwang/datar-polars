@@ -11,7 +11,7 @@ from typing import Any, Callable, List, Optional, Sequence, cast
 
 import polars as pl
 
-from datar.dplyr import (
+from datar.apis.dplyr import (
     ungroup,
     group_vars,
     where,

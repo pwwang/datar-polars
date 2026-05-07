@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from datar.dplyr import (
+from datar.apis.dplyr import (
     group_by,
     ungroup,
     rowwise,

@@ -10,7 +10,7 @@ from typing import Any
 import polars as pl
 
 from datar.core.utils import logger
-from datar.dplyr import filter_
+from datar.apis.dplyr import filter_
 
 from ...contexts import Context
 from ...tibble import (

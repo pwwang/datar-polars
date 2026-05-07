@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 import polars as pl
 
-from datar.dplyr import (
+from datar.apis.dplyr import (
     inner_join,
     left_join,
     right_join,

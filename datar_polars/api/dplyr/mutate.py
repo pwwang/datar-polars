@@ -12,7 +12,7 @@ import polars as pl
 from pipda import evaluate_expr, ReferenceAttr, ReferenceItem
 
 from datar.core.utils import arg_match
-from datar.dplyr import mutate, transmute
+from datar.apis.dplyr import mutate, transmute
 
 from ...contexts import Context
 from ...collections import Collection
