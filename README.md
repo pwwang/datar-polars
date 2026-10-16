@@ -2,7 +2,7 @@
 
 The [polars][1] backend for [datar][2] — dplyr-style data manipulation in Python, powered by lazy evaluation.
 
-[![PyPI][3]][4] [![Python][5]][4] [![CI][6]][7] [![Docs][8]][9]
+[![PyPI][3]][4] [![CI][6]][7] [![Docs][8]][9]
 
 ## Installation
 
