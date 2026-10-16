@@ -1,0 +1,25 @@
+.md-grid {
+    max-width: 95vw;
+}
+
+/* Widen notebook output areas */
+.jp-OutputArea {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.jp-OutputArea-output pre {
+    white-space: pre;
+    overflow-x: auto;
+}
+
+/* Widen notebook input code */
+.jp-InputArea {
+    max-width: 100%;
+}
+
+/* Ensure tables in notebook outputs don't overflow */
+.jp-OutputArea-output table {
+    width: auto;
+    max-width: none;
+}
