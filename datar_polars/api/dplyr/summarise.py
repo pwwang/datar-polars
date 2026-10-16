@@ -237,14 +237,16 @@ def _summarise(
         if agg_exprs:
             if gvars:
                 result = _data.group_by(gvars, maintain_order=True).agg(agg_exprs)
-                # Explode only tracked multi-value columns (e.g. multi-prob quantile)
+                # Explode only tracked multi-value columns (e.g. multi-prob
+                # quantile). empty_as_null keeps polars < 2.0 behavior, where an
+                # empty list became a null row rather than dropping the group.
                 if expand_cols:
-                    result = result.explode(list(expand_cols))
+                    result = result.explode(list(expand_cols), empty_as_null=True)
             else:
                 result = _data.select(agg_exprs)
                 # Explode only tracked multi-value columns
                 if expand_cols:
-                    result = result.explode(list(expand_cols))
+                    result = result.explode(list(expand_cols), empty_as_null=True)
         else:
             # Only deferred columns (e.g. cur_data) — build a skeleton result
             if gvars:
@@ -324,11 +326,11 @@ def _reframe(
             if gvars:
                 result = _data.group_by(gvars, maintain_order=True).agg(agg_exprs)
                 if expand_cols:
-                    result = result.explode(list(expand_cols))
+                    result = result.explode(list(expand_cols), empty_as_null=True)
             else:
                 result = _data.select(agg_exprs)
                 if expand_cols:
-                    result = result.explode(list(expand_cols))
+                    result = result.explode(list(expand_cols), empty_as_null=True)
         else:
             if gvars:
                 result = _data.select(gvars).unique(

@@ -132,3 +132,6 @@ def test_ranks():
     assert_iterable_equal(
         out.get_column("cume_dist").to_list(), [1.0, 0.2, 0.8, 0.4, 0.4, NA]
     )
+    # 1,2,2 fall in the lower half and 3,5 in the upper one, regardless of the
+    # order the values appear in
+    assert_iterable_equal(out.get_column("ntile").to_list(), [2, 1, 2, 1, 1, NA])

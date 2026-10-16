@@ -28,7 +28,7 @@ from datar.apis.base import (
 
 from ...contexts import Context
 from ...tibble import to_lazy
-from ...utils import replace_na_with_none
+from ...utils import cat_levels, replace_na_with_none
 from ..forcats import _EVAL_DATA
 
 
@@ -252,13 +252,8 @@ def _levels_expr(x: pl.Expr) -> pl.Expr:
 @levels.register(object, context=Context.EVAL, backend="polars")
 def _levels_obj(x: Any) -> Any:
     """Get the levels of a factor."""
-    if isinstance(x, pl.Series):
-        if isinstance(x.dtype, pl.Enum):
-            cats = x.cat.get_categories()
-            return cats.to_list()
-        if isinstance(x.dtype, pl.Categorical):
-            return x.drop_nulls().unique(maintain_order=True).cast(pl.Utf8).to_list()
-        return None
+    if isinstance(x, pl.Series) and _is_cat_dtype(x.dtype):
+        return cat_levels(x)
     return None
 
 
@@ -295,7 +290,7 @@ def _nlevels_obj(x: Any) -> int:
     """Get the number of levels of a factor."""
     if isinstance(x, pl.Series):
         if isinstance(x.dtype, pl.Enum):
-            return len(x.cat.get_categories())
+            return len(x.dtype.categories)
         if isinstance(x.dtype, pl.Categorical):
             return x.drop_nulls().n_unique()
     return 0
@@ -316,7 +311,7 @@ def _droplevels_obj(x: Any) -> Any:
     if isinstance(x, pl.Series) and _is_cat_dtype(x.dtype):
         used_vals = set(x.drop_nulls().cast(pl.Utf8).unique().to_list())
         if isinstance(x.dtype, pl.Enum):
-            current_cats = x.cat.get_categories().to_list()
+            current_cats = x.dtype.categories.to_list()
             new_cats = [c for c in current_cats if c in used_vals]
             return x.cast(pl.Utf8).cast(pl.Enum(new_cats))
         return x.drop_nulls().cast(pl.Categorical)

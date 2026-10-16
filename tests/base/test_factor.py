@@ -110,7 +110,7 @@ class TestFactor:
         s = pl.Series("x", ["a", "b", "a", "c", "b"])
         result = factor(s, levels=["a", "b", "c", "d"])
         assert isinstance(result.dtype, (pl.Categorical, pl.Enum))
-        assert result.cat.get_categories().to_list() == ["a", "b", "c", "d"]
+        assert result.dtype.categories.to_list() == ["a", "b", "c", "d"]
 
     def test_factor_list(self):
         result = factor(["a", "b", "a"])
@@ -196,5 +196,5 @@ class TestDroplevels:
     def test_droplevels(self):
         fct = factor(["a", "b"], levels=["a", "b", "c"])
         result = droplevels(fct)
-        assert result.cat.get_categories().to_list() == ["a", "b"]
+        assert result.dtype.categories.to_list() == ["a", "b"]
         assert levels(result) == ["a", "b"]

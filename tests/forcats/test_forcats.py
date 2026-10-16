@@ -68,7 +68,7 @@ def _levels(s):
         cats = s.dtype.categories
         return list(cats.keys()) if hasattr(cats, "keys") else list(cats)
     if s.dtype == pl.Categorical:
-        return s.cat.get_categories().to_list()
+        return s.cast(pl.Utf8).drop_nulls().unique(maintain_order=True).to_list()
     return sorted(set(v for v in s.to_list() if v is not None))
 
 

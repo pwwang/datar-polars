@@ -55,6 +55,7 @@ from datar.apis.forcats import (
 
 from ..contexts import Context
 from ..common import is_scalar, setdiff, union, intersect, is_null
+from ..utils import cat_levels
 
 # Context variable to pass the evaluating LazyFrame to Expr-based forcats
 # implementations. Set by verb implementations before calling evaluate_expr().
@@ -95,8 +96,7 @@ def _check_factor(_f: Any) -> pl.Series:
         return s
     # If it's Categorical, convert to Enum with current categories
     if s.dtype == pl.Categorical:
-        cats = s.cat.get_categories().to_list()
-        return s.cast(pl.Enum(cats))
+        return s.cast(pl.Enum(cat_levels(s)))
     # If it's a string, convert to Enum with observed values as categories
     if s.dtype in (pl.Utf8, pl.String):
         # Get unique non-null values in order of first appearance
@@ -160,9 +160,7 @@ def _get_levels(_f: pl.Series) -> list:
     if _f.dtype == pl.Enum:
         cats = _f.dtype.categories
         return list(cats.keys()) if hasattr(cats, "keys") else list(cats)
-    if _f.dtype == pl.Categorical:
-        return _f.cat.get_categories().to_list()
-    # For string/non-enum, return unique values in appearance order
+    # For categorical/string/non-enum, return unique values in appearance order
     vals = _f.drop_nulls()
     seen = set()
     cats = []

@@ -112,7 +112,10 @@ def _recode_series(
     if _default is not NODEFAULT:
         old_keys = [k for k in values.keys() if k is not None]
         if old_keys:
-            not_replaced = ~pl.col(x_name).is_in(old_keys) & pl.col(x_name).is_not_null()
+            # polars >= 2.0 refuses is_in across numeric types (e.g. int keys
+            # against a float column), so compare value by value instead.
+            replaced = pl.any_horizontal([pl.col(x_name) == k for k in old_keys])
+            not_replaced = ~replaced & pl.col(x_name).is_not_null()
         else:
             not_replaced = pl.col(x_name).is_not_null()
         if expr is None:

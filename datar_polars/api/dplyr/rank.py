@@ -19,6 +19,7 @@ from datar.apis.dplyr import (
 )
 
 from ...polars import Series
+from ...utils import ntile_bins
 
 
 # ── row_number ──────────────────────────────────────────────────────────────
@@ -44,14 +45,11 @@ def _ntile(x: Any, *, n: int = None) -> Any:
     if n is None:
         raise ValueError("`n` must be provided for ntile().")
     if isinstance(x, pl.Expr):
-        # Use polars native qcut — to_physical() gives integer bin codes
-        return pl.when(x.is_not_null() & x.is_not_nan()).then(
-            x.qcut(n).to_physical() + 1
-        )
+        return pl.when(x.is_not_null() & x.is_not_nan()).then(ntile_bins(x, n))
     if isinstance(x, Series):
         na_mask = x.is_null() | x.is_nan()
-        result = x.qcut(n).to_physical().cast(pl.Int64) + 1
-        if na_mask.any():
+        result = ntile_bins(x, n)
+        if na_mask.any():  # rank() counts NaN as a value; dplyr treats it as NA
             result = result.set(na_mask, None)
         return result
     # Generic case: use numpy

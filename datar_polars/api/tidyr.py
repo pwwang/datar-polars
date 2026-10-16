@@ -50,6 +50,7 @@ from ..common import is_scalar, setdiff, union, intersect
 from ..utils import (
     vars_select,
     to_series,
+    cat_levels,
     DEFAULT_COLUMN_PREFIX,
     replace_na_with_none,
 )
@@ -700,7 +701,7 @@ def _expand(
             if col_name in all_columns:
                 col = df.get_column(col_name)
                 if isinstance(col.dtype, (pl.Enum, pl.Categorical)):
-                    units.append(([col_name], [col.cat.get_categories().to_list()]))
+                    units.append(([col_name], [cat_levels(col)]))
                 else:
                     units.append(([col_name], [col.unique(maintain_order=True).to_list()]))
         elif hasattr(arg, "columns") and hasattr(arg, "collect"):
@@ -713,7 +714,7 @@ def _expand(
         elif isinstance(arg, str) and arg in all_columns:
             col = df.get_column(arg)
             if isinstance(col.dtype, (pl.Enum, pl.Categorical)):
-                units.append(([arg], [col.cat.get_categories().to_list()]))
+                units.append(([arg], [cat_levels(col)]))
             else:
                 units.append(([arg], [col.unique(maintain_order=True).to_list()]))
         elif arg is not None:
@@ -1202,7 +1203,9 @@ def _unnest(
         result = pl.DataFrame(result_series)
         return reconstruct_tibble(result, data)
 
-    result = data.explode(col_names)
+    # polars >= 2.0 defaults empty_as_null to False, which drops the rows of
+    # empty lists instead of making them null; keep_empty needs those rows.
+    result = data.explode(col_names, empty_as_null=keep_empty)
 
     # Apply dtype casts for native List columns
     if dtypes is not None:
@@ -1469,7 +1472,7 @@ def _separate_rows(
         ).alias(cn)
         for cn in col_names
     ]
-    result = _data.with_columns(split_exprs).explode(col_names)
+    result = _data.with_columns(split_exprs).explode(col_names, empty_as_null=True)
 
     # Apply convert
     if convert:

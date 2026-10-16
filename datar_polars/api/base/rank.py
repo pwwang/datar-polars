@@ -23,6 +23,7 @@ from datar.apis.dplyr import (
 
 from ...contexts import Context
 from ...tibble import Tibble, LazyTibble
+from ...utils import ntile_bins
 
 
 # ---- row_number ---------------------------------------------------------
@@ -155,9 +156,7 @@ def _cume_dist_obj(x: Any, *, na_last: str = "keep") -> Any:
 def _ntile_expr(x: pl.Expr, *, n: int = None) -> pl.Expr:
     if n is None:
         raise ValueError("`n` must be provided for ntile()")
-    return pl.when(x.is_not_null() & x.is_not_nan()).then(
-        x.qcut(n).to_physical() + 1
-    )
+    return pl.when(x.is_not_null() & x.is_not_nan()).then(ntile_bins(x, n))
 
 
 @ntile_.register(object, context=Context.EVAL, backend="polars")
@@ -166,8 +165,8 @@ def _ntile_obj(x: Any, *, n: int = None) -> Any:
         raise ValueError("`n` must be provided for ntile()")
     if isinstance(x, pl.Series):
         na_mask = x.is_null() | x.is_nan()
-        result = x.qcut(n).to_physical().cast(pl.Int64) + 1
-        if na_mask.any():
+        result = ntile_bins(x, n)
+        if na_mask.any():  # rank() counts NaN as a value; dplyr treats it as NA
             result = result.set(na_mask, None)
         return result
     import numpy as np

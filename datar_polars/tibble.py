@@ -174,6 +174,16 @@ class LazyTibble(pl.LazyFrame):
         _datar = getattr(self, "_datar", {}).copy()
         return Tibble(df, _datar=_datar)
 
+    def _collect_eager(self, **kwargs: Any) -> Tibble:
+        """Collect an internal eager operation, preserving _datar.
+
+        polars >= 2.0 implements eager DataFrame methods (select, filter,
+        with_columns, ...) as ``self.lazy().<op>()._collect_eager()``, which
+        returns a plain DataFrame and so would drop both the Tibble type and
+        its metadata."""
+        df = super()._collect_eager(**kwargs)
+        return Tibble(df, _datar=getattr(self, "_datar", {}).copy())
+
 
 # ---- Standalone conversion utilities ----------------------------------------
 

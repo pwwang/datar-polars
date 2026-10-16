@@ -117,6 +117,33 @@ def to_series(x: Any) -> pl.Series:
     return pl.Series("", [x] if is_scalar(x) else x, strict=False)
 
 
+def cat_levels(x: pl.Series) -> list:
+    """Get the levels of a factor-like Series (pl.Enum or pl.Categorical).
+
+    A pl.Enum carries a fixed category list; a pl.Categorical does not, so its
+    distinct values in order of appearance stand in for the levels.
+    Replaces ``Series.cat.get_categories``, removed in polars 2.0.
+    """
+    if isinstance(x.dtype, pl.Enum):
+        return x.dtype.categories.to_list()
+    return x.cast(pl.Utf8).drop_nulls().unique(maintain_order=True).to_list()
+
+
+def ntile_bins(x: pl.Expr | pl.Series, n: int) -> pl.Expr | pl.Series:
+    """Split x into n buckets of roughly equal size, numbered from 1.
+
+    Buckets are cut on ordinal rank (dplyr's ntile), not on the values, so
+    tied values may land in different buckets and nulls/NaNs stay null.
+    Computed directly rather than via ``qcut``: that is deprecated in polars
+    2.0 and its replacement ``bin_quantiles`` does not exist in 1.36, and the
+    two number their bins differently anyway.
+    """
+    non_na = x.is_not_null() & x.is_not_nan()
+    return (((x.rank("ordinal") - 1) * n / non_na.sum()).floor() + 1).cast(
+        pl.Int64
+    )
+
+
 def vars_select(
     all_columns: Iterable[str],
     *columns: int | str,
