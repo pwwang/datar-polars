@@ -44,7 +44,7 @@ from datar.apis.tidyr import (
 from pipda import register_verb
 
 from ..contexts import Context
-from ..tibble import Tibble, LazyTibble, reconstruct_tibble, as_tibble
+from ..tibble import Tibble, LazyTibble, reconstruct_tibble, to_eager, as_tibble
 from ..collections import Collection
 from ..common import is_scalar, setdiff, union, intersect
 from ..utils import (
@@ -56,6 +56,19 @@ from ..utils import (
 )
 from .base.seq import _seq_obj
 from ..polars import DataFrame
+
+
+# polars 2.0 dropped dtype strings; these are the ones users write for name columns
+_DTYPE_ALIASES = {
+    "categorical": pl.Categorical,
+    "cat": pl.Categorical,
+    "string": pl.String,
+    "str": pl.String,
+    "int": pl.Int64,
+    "integer": pl.Int64,
+    "float": pl.Float64,
+    "bool": pl.Boolean,
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -319,7 +332,21 @@ def _pivot_longer(
             re.sub(f"^{names_prefix}", "", v) for v in resolved_vars
         ]
 
-    var_name = names_to if isinstance(names_to, str) else names_to[0]
+    names_cols = names_to if isinstance(names_to, list) else [names_to]
+    if len(names_cols) > 1 and not (names_sep or names_pattern):
+        raise ValueError(
+            "If you supply multiple names in `names_to` you must also supply "
+            "one of `names_sep` or `names_pattern`."
+        )
+    if names_sep and names_pattern:
+        raise ValueError(
+            "Only one of `names_sep` or `names_pattern` should be supplied."
+        )
+
+    # The variable column is split into the names_to columns and dropped, so it
+    # only needs a name of its own when it survives
+    splitting = bool(names_sep or names_pattern)
+    var_name = f"{DEFAULT_COLUMN_PREFIX}names" if splitting else names_cols[0]
 
     # Add row index for R-style ordering (interleaved, not grouped by var)
     _data = _data.with_columns(pl.int_range(0, pl.len()).alias("_row_idx"))
@@ -342,17 +369,40 @@ def _pivot_longer(
         _var_col.cast(_var_order)
     ).sort(by=["_row_idx", var_name]).drop("_row_idx")
 
-    # Handle names_sep for multi-column names_to
-    if names_sep and isinstance(names_to, list) and len(names_to) > 1:
-        for i, name_col in enumerate(names_to):
-            if name_col is None:
-                continue
-            result = result.with_columns(
-                pl.col(var_name)
-                .str.split(names_sep)
-                .list.get(i)
-                .alias(name_col)
-            )
+    # The categorical above only ordered the sort; the name column is a string as
+    # in tidyr, and splitting or matching it needs one anyway
+    result = result.with_columns(pl.col(var_name).cast(pl.String))
+
+    # Extract the names_to columns from the variable column, which they replace
+    if splitting:
+        if names_sep:
+            parts = pl.col(var_name).str.split(names_sep)
+            exprs = [parts.list.get(i).alias(c) for i, c in enumerate(names_cols) if c]
+        else:
+            exprs = [
+                # group 1 is the first capture group; group 0 is the whole match
+                pl.col(var_name).str.extract(names_pattern, i + 1).alias(c)
+                for i, c in enumerate(names_cols)
+                if c
+            ]
+        result = (
+            result.with_columns(exprs)
+            .select(id_vars + [c for c in names_cols if c] + [values_to])
+        )
+
+    # names_dtypes applies to the names_to columns; a scalar applies to all of
+    # them. Anything but a string alias goes to cast() as is.
+    if names_dtypes:
+        dtypes = (
+            names_dtypes
+            if isinstance(names_dtypes, Mapping)
+            else dict.fromkeys(names_cols, names_dtypes)
+        )
+        result = result.with_columns(
+            pl.col(c).cast(_DTYPE_ALIASES.get(dtypes[c], dtypes[c]))
+            for c in names_cols
+            if c in dtypes
+        )
 
     if values_drop_na:
         result = result.filter(pl.col(values_to).is_not_null())
@@ -363,6 +413,15 @@ def _pivot_longer(
 # ═══════════════════════════════════════════════════════════════════════════════
 # pivot_wider — long to wide
 # ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _pivot_aggregate(values_fn: Any, value: str) -> pl.Expr:
+    """The aggregation expression pivoting one `values_from` column."""
+    if values_fn is None:
+        return pl.element().first()
+    fn = values_fn[value] if isinstance(values_fn, Mapping) else values_fn
+    fn_name = getattr(fn, "__name__", str(fn))
+    return getattr(pl.element(), fn_name)()
 
 
 @pivot_wider.register((Tibble, LazyTibble), context=Context.SELECT, backend="polars")
@@ -386,59 +445,79 @@ def _pivot_wider(
     # Resolve names_from and values_from
     if names_from is None:
         names_from = all_columns[0]
+    if isinstance(names_from, (list, tuple)):
+        if len(names_from) > 1:
+            raise ValueError("pivot_wider() supports a single `names_from` column.")
+        names_from = names_from[0]
+    names_col = names_from
+
     if values_from is None:
-        values_from = [c for c in all_columns if c != names_from][0]
-
-    if isinstance(values_from, (list, tuple)):
-        values_from = values_from[0]
-
-    if isinstance(names_from, str):
-        names_col = names_from
+        values_cols = [c for c in all_columns if c != names_col][:1]
+    elif isinstance(values_from, str):
+        values_cols = [values_from]
     else:
-        names_col = names_from
-
-    if isinstance(values_from, str):
-        values_col = values_from
-    else:
-        values_col = values_from
+        values_cols = list(values_from)
 
     # Determine index columns
     if id_cols is None:
-        index_cols = [c for c in all_columns if c not in (names_col, values_col)]
+        index_cols = [
+            c for c in all_columns if c != names_col and c not in values_cols
+        ]
     else:
         index_cols = id_cols if isinstance(id_cols, list) else [id_cols]
 
-    if values_fn is None:
-        aggregate_function = pl.element().first()
-    elif isinstance(values_fn, dict):
-        aggregate_function = pl.element().map_elements(
-            lambda x: values_fn[values_col](x)
+    # polars 2.0 requires the set of values to pivot on up front for a lazy frame,
+    # so the frame is materialized here and turned lazy again at the end.
+    lazy = isinstance(_data, LazyTibble)
+    df = to_eager(_data)
+
+    # With no index columns and several value columns, each pivot would otherwise
+    # index by the other value column; a constant one keeps them joinable.
+    placeholder = None
+    if not index_cols and len(values_cols) > 1:
+        placeholder = f"{DEFAULT_COLUMN_PREFIX}pivot_id"
+        df = df.with_columns(pl.lit(0).alias(placeholder))
+        index_cols = [placeholder]
+
+    # One pivot per value column, joined back together on the index columns.
+    # names_sep joins the value column's name to the names_from value, as tidyr
+    # does; a lone value column keeps the bare name.
+    frames = []
+    for value in values_cols:
+        frame = df.pivot(
+            index=index_cols if index_cols else None,
+            on=names_col,
+            values=value,
+            aggregate_function=_pivot_aggregate(values_fn, value),
         )
-    else:
-        fn_name = getattr(values_fn, "__name__", str(values_fn))
-        aggregate_function = getattr(pl.element(), fn_name)()
+        frames.append(
+            frame.rename({
+                c: (
+                    f"{names_prefix}{value}{names_sep}{c}"
+                    if len(values_cols) > 1
+                    else f"{names_prefix}{c}"
+                )
+                for c in frame.columns
+                if c not in index_cols
+            })
+        )
 
-    result = _data.pivot(
-        index=index_cols if index_cols else None,
-        on=names_col,
-        values=values_col,
-        aggregate_function=aggregate_function,
-    )
+    # nulls_equal: a null index value is a group of its own in both pivots, and the
+    # default (False) would drop those rows from the inner join
+    result = frames[0]
+    for frame in frames[1:]:
+        result = result.join(frame, on=index_cols, how="inner", nulls_equal=True)
 
-    # Apply names_prefix
-    if names_prefix:
-        current_cols = result.collect_schema().names()
-        new_cols = {}
-        for c in current_cols:
-            if c not in index_cols:
-                new_cols[c] = names_prefix + str(c)
-        if new_cols:
-            result = result.rename(new_cols)
+    if placeholder:
+        result = result.drop(placeholder)
 
     if values_fill is not None:
-        value_cols = [c for c in result.collect_schema().names() if c not in index_cols]
+        value_cols = [c for c in result.columns if c not in index_cols]
         for vc in value_cols:
             result = result.with_columns(pl.col(vc).fill_null(values_fill))
+
+    if lazy:
+        result = result.lazy()
 
     return reconstruct_tibble(result, _data)
 

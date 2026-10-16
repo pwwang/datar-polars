@@ -23,7 +23,7 @@ from datar.tidyr import (
     uncount,
     expand_grid,
 )
-from datar_polars.tibble import as_tibble
+from datar_polars.tibble import as_tibble, LazyTibble
 
 from ..conftest import assert_df_equal, assert_iterable_equal
 
@@ -205,6 +205,86 @@ class TestPivotLonger:
         assert out.shape == (1, 3)
         assert out.get_column("value").to_list() == [2]
 
+    def test_pivot_longer_name_column_is_string(self):
+        "The names column is a plain string, not an Enum."
+        df = _df({"id": [1], "x": [1], "y": [2]})
+        out = df >> pivot_longer(["x", "y"], **BA)
+        assert out.schema["name"] == pl.String
+
+    def test_pivot_longer_names_dtypes(self):
+        "names_dtypes casts the names columns."
+        df = _df({"id": [1], "x": [1], "y": [2]})
+        out = df >> pivot_longer(["x", "y"], names_dtypes="categorical", **BA)
+        assert out.schema["name"] == pl.Categorical
+
+        df = _df({"id": [1], "BP_day1": [1]})
+        out = df >> pivot_longer(
+            ["BP_day1"],
+            names_to=["measurement", "day"],
+            names_sep="_",
+            names_dtypes={"day": "categorical"},
+            **BA,
+        )
+        assert out.schema["measurement"] == pl.String
+        assert out.schema["day"] == pl.Categorical
+
+    def test_pivot_longer_names_sep(self):
+        "names_sep splits the names column into one column per names_to."
+        df = _df({"id": [1, 2], "BP_day1": [1, 2], "BP_day2": [3, 4]})
+        out = df >> pivot_longer(
+            ["BP_day1", "BP_day2"],
+            names_to=["measurement", "day"],
+            names_sep="_",
+            **BA,
+        )
+        assert out.columns == ["id", "measurement", "day", "value"]
+        assert out.get_column("measurement").to_list() == ["BP"] * 4
+        assert out.get_column("day").to_list() == ["day1", "day2"] * 2
+        assert out.get_column("value").to_list() == [1, 3, 2, 4]
+
+    def test_pivot_longer_names_sep_discards_none(self):
+        "A None in names_to discards that part of the split."
+        df = _df({"id": [1], "BP_day1": [1], "BP_day2": [2]})
+        out = df >> pivot_longer(
+            ["BP_day1", "BP_day2"],
+            names_to=[None, "day"],
+            names_sep="_",
+            **BA,
+        )
+        assert out.columns == ["id", "day", "value"]
+        assert out.get_column("day").to_list() == ["day1", "day2"]
+
+    def test_pivot_longer_names_pattern(self):
+        "names_pattern maps capture groups onto the names_to columns."
+        df = _df({"id": [1], "BP_day1": [1], "HR_day2": [2]})
+        out = df >> pivot_longer(
+            ["BP_day1", "HR_day2"],
+            names_to=["measurement", "day"],
+            names_pattern=r"([A-Z]+)_day(\d+)",
+            **BA,
+        )
+        assert out.columns == ["id", "measurement", "day", "value"]
+        assert out.get_column("measurement").to_list() == ["BP", "HR"]
+        assert out.get_column("day").to_list() == ["1", "2"]
+
+    def test_pivot_longer_multiple_names_to_requires_sep_or_pattern(self):
+        "Multiple names_to without names_sep/names_pattern is an error."
+        df = _df({"id": [1], "BP_day1": [1]})
+        with pytest.raises(ValueError, match="multiple names"):
+            df >> pivot_longer(["BP_day1"], names_to=["a", "b"], **BA)
+
+    def test_pivot_longer_sep_and_pattern_conflict(self):
+        "names_sep and names_pattern together is an error."
+        df = _df({"id": [1], "BP_day1": [1]})
+        with pytest.raises(ValueError, match="Only one of"):
+            df >> pivot_longer(
+                ["BP_day1"],
+                names_to=["a", "b"],
+                names_sep="_",
+                names_pattern=r"(a)",
+                **BA,
+            )
+
     def test_pivot_longer_relig_income(self):
         out = relig_income >> \
             pivot_longer(~f.religion, names_to="income", values_to="count")
@@ -287,6 +367,62 @@ class TestPivotWider:
         )
         assert out.shape == (3, 3)
         assert set(out["tension"]) == {"H", "L", "M"}
+
+    def test_pivot_wider_multiple_values(self):
+        "names_sep joins the value column's name to the names_from value."
+        df = _df({
+            "id": [1, 2],
+            "region": ["West", "East"],
+            "sales": [1.0, 2.0],
+            "quantity": [10, 20],
+        })
+        out = df >> pivot_wider(
+            names_from=f.region,
+            values_from=[f.sales, f.quantity],
+            names_sep="_",
+            **BA,
+        )
+        assert out.columns == [
+            "id", "sales_West", "sales_East", "quantity_West", "quantity_East",
+        ]
+        assert out["sales_West"].to_list() == [1.0, None]
+        assert out["quantity_East"].to_list() == [None, 20]
+
+    def test_pivot_wider_names_sep(self):
+        df = _df({
+            "id": [1, 2],
+            "region": ["West", "East"],
+            "sales": [1.0, 2.0],
+            "quantity": [10, 20],
+        })
+        out = df >> pivot_wider(
+            names_from=f.region,
+            values_from=[f.sales, f.quantity],
+            names_sep=".",
+            **BA,
+        )
+        assert "sales.West" in out.columns
+        # a single value column keeps the bare name
+        out = df >> pivot_wider(names_from=f.region, values_from=f.sales, **BA)
+        assert out.columns == ["id", "quantity", "West", "East"]
+
+    def test_pivot_wider_lazy(self):
+        "A lazy frame stays lazy, and the pivoted names are the same."
+        df = _df({
+            "id": [1, 2],
+            "region": ["West", "East"],
+            "sales": [1.0, 2.0],
+            "quantity": [10, 20],
+        }).lazy()
+        out = df >> pivot_wider(
+            names_from=f.region,
+            values_from=[f.sales, f.quantity],
+            **BA,
+        )
+        assert isinstance(out, LazyTibble)
+        assert out.collect().columns == [
+            "id", "sales_West", "sales_East", "quantity_West", "quantity_East",
+        ]
 
 
 # ===========================================================================
