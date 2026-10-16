@@ -427,6 +427,120 @@ def _as_ordered_obj(x: Any) -> Any:
 # ── cut ──────────────────────────────────────────────────────────────────
 
 
+def _cut_breaks(lo: float, hi: float, n: int) -> list[float]:
+    """The n + 1 breaks R's cut() derives for an integer `breaks`.
+
+    Equal-width intervals spanning [lo, hi], with the outer breaks nudged
+    outwards so the extreme values fall inside the first and last interval
+    instead of on an excluded edge.
+    """
+    dx = hi - lo
+    if dx == 0:
+        dx = abs(lo) if lo else 1.0
+        return [lo + dx / 1000 * (2 * i / n - 1) for i in range(n + 1)]
+    breaks = [lo + dx * i / n for i in range(n + 1)]
+    breaks[0] -= dx / 1000
+    breaks[-1] += dx / 1000
+    return breaks
+
+
+def _cut_labels(breaks: list, right: bool, dig_lab: int) -> list[str]:
+    """R's interval labels for `breaks`, e.g. '(0.995,2.67]'."""
+    ends = [f"{b:.{dig_lab}g}" for b in breaks]
+    return [
+        f"({a},{b}]" if right else f"[{a},{b})"
+        for a, b in zip(ends, ends[1:])
+    ]
+
+
+def _cut_codes(
+    x: pl.Expr, breaks: list, right: bool, include_lowest: bool
+) -> pl.Expr:
+    """The 1-based bin of each value of `x` within `breaks`, null outside them.
+
+    Bin i holds the values in (breaks[i-1], breaks[i]] when `right`, or
+    [breaks[i-1], breaks[i]) otherwise. `breaks` may hold floats or, when the
+    values are only known at runtime, expressions.
+    """
+    if right:
+        idx = pl.sum_horizontal([x > b for b in breaks])
+    else:
+        idx = pl.sum_horizontal([x >= b for b in breaks])
+    nbins = len(breaks) - 1
+    if include_lowest:
+        # R closes the first interval's left edge -- the last one's right edge
+        # when right=False -- so the extreme value is binned rather than dropped
+        idx = (
+            pl.when(x == breaks[0])
+            .then(pl.lit(1 if right else nbins))
+            .otherwise(idx)
+        )
+    return pl.when(x.is_not_null() & (idx >= 1) & (idx <= nbins)).then(idx)
+
+
+def _cut_expr_breaks(x: pl.Expr, n: int) -> list:
+    """`_cut_breaks` with the range left as expressions, for the case where the
+    data cut() is being applied to cannot be reached."""
+    lo, hi = x.min(), x.max()
+    dx = hi - lo
+    return (
+        [lo - dx / 1000]
+        + [lo + dx * i / n for i in range(1, n)]
+        + [hi + dx / 1000]
+    )
+
+
+def _cut_factor(
+    x: pl.Expr,
+    breaks: Any,
+    labels: Any,
+    include_lowest: bool,
+    right: bool,
+    dig_lab: int,
+) -> pl.Expr:
+    """The cut() expression for `x`: a factor whose levels are the bin labels."""
+    breaks = list(breaks)
+    if len(breaks) < 2:
+        raise ValueError("`breaks` must hold at least two values.")
+    if any(b <= a for a, b in zip(breaks, breaks[1:])):
+        raise ValueError("`breaks` must be strictly increasing.")
+
+    nbins = len(breaks) - 1
+    if labels is None:
+        labels = _cut_labels(breaks, right, dig_lab)
+    elif len(labels) != nbins:
+        raise ValueError(f"`labels` must hold {nbins} values, got {len(labels)}.")
+    labels = [str(label) for label in labels]
+
+    codes = _cut_codes(x, breaks, right, include_lowest)
+    return codes.replace_strict(
+        dict(enumerate(labels, 1)), default=None, return_dtype=pl.Enum(labels)
+    )
+
+
+def _cut_range(x: pl.Expr) -> tuple | None:
+    """The (min, max) of `x`, or None when its data cannot be reached.
+
+    `mutate` publishes the data under evaluation in `_EVAL_DATA`; outside of
+    it (any other verb, or a bare Expr) the range is not known up front.
+    """
+    data = _EVAL_DATA.get()
+    if data is None:
+        return None
+    try:
+        lo, hi = (
+            to_lazy(data)
+            .select(x.min().alias("_lo"), x.max().alias("_hi"))
+            .collect()
+            .row(0)
+        )
+    except Exception:
+        return None
+    if lo is None:
+        raise ValueError("`cut` cannot derive breaks from an all-null vector.")
+    return lo, hi
+
+
 @cut.register(pl.Expr, context=Context.EVAL, backend="polars")
 def _cut_expr(
     x: pl.Expr,
@@ -439,10 +553,15 @@ def _cut_expr(
 ) -> pl.Expr:
     """Cut a numeric expression into bins."""
     if isinstance(breaks, int):
-        return x.qcut(breaks, labels=labels is not None)
-    if isinstance(breaks, (list, tuple)):
-        return x.cut(breaks, labels=labels)
-    raise ValueError(f"Unsupported breaks type: {type(breaks)}")
+        rng = _cut_range(x)
+        if rng is None:
+            # The data is out of reach, so the intervals cannot be spaced or
+            # named after it; all that can be returned is the bin number.
+            return _cut_codes(
+                x, _cut_expr_breaks(x, breaks), right, include_lowest
+            )
+        breaks = _cut_breaks(rng[0], rng[1], breaks)
+    return _cut_factor(x, breaks, labels, include_lowest, right, dig_lab)
 
 
 @cut.register(object, context=Context.EVAL, backend="polars")
@@ -456,30 +575,18 @@ def _cut_obj(
     ordered_result: bool = False,
 ) -> Any:
     """Cut a numeric vector into bins."""
-    if isinstance(x, pl.Series):
-        if isinstance(breaks, int):
-            if labels is not None:
-                return x.qcut(breaks, labels=labels, include_breaks=True)
-            return x.qcut(breaks, labels=labels)
-        if isinstance(breaks, (list, tuple)):
-            return x.cut(breaks, labels=labels)
-        raise ValueError(f"Unsupported breaks type: {type(breaks)}")
     if isinstance(x, pl.Expr):
-        return _cut_expr(x, breaks, labels, include_lowest, right, dig_lab, ordered_result)
-    import numpy as np
-    x_arr = np.asarray(x, dtype=float)
+        return _cut_expr(
+            x, breaks, labels, include_lowest, right, dig_lab, ordered_result
+        )
+    if not isinstance(x, pl.Series):
+        x = pl.Series("x", list(x), strict=False)
+    frame = x.to_frame()
+    name = frame.columns[0]
     if isinstance(breaks, int):
-        bins = np.histogram_bin_edges(x_arr, bins=breaks)
-    else:
-        bins = np.asarray(breaks, dtype=float)
-    indices = np.digitize(x_arr, bins, right=right)
-    if include_lowest:
-        indices[x_arr == bins[0]] = 1
-    if labels is not None:
-        if len(labels) != len(bins) - 1:
-            raise ValueError("`labels` must be the same length as the number of bins.")
-        label_arr = np.array(labels)
-        result_arr = np.where((indices > 0) & (indices < len(bins)),
-                              label_arr[indices - 1], np.nan)
-        return result_arr.tolist()
-    return indices
+        values = frame.get_column(name)
+        if values.min() is None:
+            raise ValueError("`cut` cannot derive breaks from an all-null vector.")
+        breaks = _cut_breaks(values.min(), values.max(), breaks)
+    factor = _cut_factor(pl.col(name), breaks, labels, include_lowest, right, dig_lab)
+    return frame.select(factor).to_series()

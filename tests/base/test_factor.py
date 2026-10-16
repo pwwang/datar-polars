@@ -2,10 +2,12 @@
 droplevels, is_factor, is_ordered, as_factor, as_ordered.
 """
 
+import pytest
 import polars as pl
 from datar import f
 from datar.base import (
     c,
+    cut,
     factor,
     ordered,
     levels,
@@ -198,3 +200,75 @@ class TestDroplevels:
         result = droplevels(fct)
         assert result.dtype.categories.to_list() == ["a", "b"]
         assert levels(result) == ["a", "b"]
+
+
+# -- cut -------------------------------------------------------------------
+
+
+class TestCut:
+    def test_cut_int_breaks_are_equal_width(self):
+        # R: cut(1:6, 3) spans [1, 6] in three equal widths, nudging the outer
+        # breaks out so 1 and 6 land inside the first and last interval
+        s = pl.Series("x", [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        result = cut(s, 3)
+        assert levels(result) == ["(0.995,2.67]", "(2.67,4.33]", "(4.33,6]"]
+        assert result.to_list() == [
+            "(0.995,2.67]",
+            "(0.995,2.67]",
+            "(2.67,4.33]",
+            "(2.67,4.33]",
+            "(4.33,6]",
+            "(4.33,6]",
+        ]
+
+    def test_cut_explicit_breaks_are_right_closed(self):
+        s = pl.Series("x", [0.0, 1.0, 4.0, 6.0])
+        result = cut(s, [0.0, 3.0, 6.0])
+        assert levels(result) == ["(0,3]", "(3,6]"]
+        # 0 sits on an excluded edge; 6 sits on an included one
+        assert result.to_list() == [None, "(0,3]", "(3,6]", "(3,6]"]
+
+    def test_cut_include_lowest(self):
+        s = pl.Series("x", [0.0, 1.0, 4.0])
+        result = cut(s, [0.0, 3.0, 6.0], include_lowest=True)
+        assert result.to_list() == ["(0,3]", "(0,3]", "(3,6]"]
+
+    def test_cut_right_false_is_left_closed(self):
+        s = pl.Series("x", [0.0, 3.0, 6.0])
+        result = cut(s, [0.0, 3.0, 6.0], right=False)
+        assert levels(result) == ["[0,3)", "[3,6)"]
+        assert result.to_list() == ["[0,3)", "[3,6)", None]
+
+    def test_cut_labels_replace_the_intervals(self):
+        s = pl.Series("x", [1.0, 4.0])
+        result = cut(s, [0.0, 3.0, 6.0], labels=["lo", "hi"])
+        assert levels(result) == ["lo", "hi"]
+        assert result.to_list() == ["lo", "hi"]
+
+    def test_cut_labels_must_match_bin_count(self):
+        s = pl.Series("x", [1.0, 4.0])
+        with pytest.raises(ValueError, match="must hold 2 values"):
+            cut(s, [0.0, 3.0, 6.0], labels=["lo"])
+
+    def test_cut_breaks_must_increase(self):
+        s = pl.Series("x", [1.0, 4.0])
+        with pytest.raises(ValueError, match="strictly increasing"):
+            cut(s, [0.0, 3.0, 3.0])
+
+    def test_cut_in_mutate(self):
+        df = _df({"x": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]})
+        out = df >> mutate(b=cut(f.x, 3))
+        result = out.collect().get_column("b")
+        assert levels(result) == ["(0.995,2.67]", "(2.67,4.33]", "(4.33,6]"]
+        assert result.to_list() == [
+            "(0.995,2.67]",
+            "(0.995,2.67]",
+            "(2.67,4.33]",
+            "(2.67,4.33]",
+            "(4.33,6]",
+            "(4.33,6]",
+        ]
+
+    def test_cut_list(self):
+        result = cut([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [0.0, 3.0, 6.0])
+        assert result.to_list() == ["(0,3]"] * 3 + ["(3,6]"] * 3
