@@ -85,7 +85,10 @@ class TestAsOrdered:
         out = df >> mutate(
             y=as_ordered(f.x)
         )
-        assert out is not None
+        y = out.collect().get_column("y")
+        assert isinstance(y.dtype, pl.Enum)
+        # ordered by level order, not lexically (high, low, medium)
+        assert y.sort().to_list() == ["low", "medium", "high"]
 
     def test_as_ordered_c(self):
         result = as_ordered(c("low", "medium", "high"))

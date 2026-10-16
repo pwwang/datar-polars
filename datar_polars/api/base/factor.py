@@ -27,7 +27,9 @@ from datar.apis.base import (
 )
 
 from ...contexts import Context
+from ...tibble import to_lazy
 from ...utils import replace_na_with_none
+from ..forcats import _EVAL_DATA
 
 
 # ── helpers ──────────────────────────────────────────────────────────────
@@ -75,6 +77,27 @@ def _apply_labels_series(
 def _is_cat_dtype(dtype) -> bool:
     """Check if a polars dtype is Categorical or Enum (factor-like)."""
     return isinstance(dtype, (pl.Categorical, pl.Enum))
+
+
+def _derive_levels_from_data(x: pl.Expr) -> list | None:
+    """Derive the Enum levels of `x` by evaluating it against the data it is
+    being evaluated on.
+
+    `mutate` publishes that data in `_EVAL_DATA` for the duration of each
+    expression's evaluation. Outside of it (any other verb, or a bare Expr)
+    the data is not available, so None is returned and the caller falls back
+    to pl.Categorical."""
+    data = _EVAL_DATA.get()
+    if data is None:
+        return None
+    try:
+        values = (
+            to_lazy(data).select(x).collect().get_column(x.meta.output_name())
+        )
+    except Exception:
+        # Levels are best-effort: fall back to Categorical rather than fail here
+        return None
+    return _derive_levels(values.cast(pl.Utf8).to_list())
 
 
 def _apply_labels_expr(
@@ -372,8 +395,17 @@ def _as_factor_obj(x: Any) -> Any:
 
 @as_ordered.register(pl.Expr, context=Context.EVAL, backend="polars")
 def _as_ordered_expr(x: pl.Expr) -> pl.Expr:
-    """Convert an expression to an ordered factor."""
-    return x.cast(pl.Utf8).cast(pl.Categorical)
+    """Convert an expression to an ordered factor.
+
+    Ordered factors are represented as pl.Enum, whose categories carry the
+    level order (levels are derived from the data being evaluated, in order
+    of first appearance). Falls back to pl.Categorical when the levels are
+    not available (e.g. a bare Expr outside a verb).
+    """
+    str_levels = _derive_levels_from_data(x)
+    if str_levels is None:
+        return x.cast(pl.Utf8).cast(pl.Categorical)
+    return x.cast(pl.Utf8).cast(pl.Enum(str_levels))
 
 
 @as_ordered.register(object, context=Context.EVAL, backend="polars")

@@ -151,8 +151,11 @@ def _mutate_impl(
             continue
 
         bkup_name = name_of(val)
-        _EVAL_DATA.set(data)
-        val = evaluate_expr(val, data, cast(Any, Context.EVAL))
+        token = _EVAL_DATA.set(data)
+        try:
+            val = evaluate_expr(val, data, cast(Any, Context.EVAL))
+        finally:
+            _EVAL_DATA.reset(token)
         if val is None:
             continue
 
@@ -191,8 +194,11 @@ def _mutate_impl(
 
     # ---- keyword args ------------------------------------------------------
     for key, val in kwargs.items():
-        _EVAL_DATA.set(data)
-        val = evaluate_expr(val, data, cast(Any, Context.EVAL))
+        token = _EVAL_DATA.set(data)
+        try:
+            val = evaluate_expr(val, data, cast(Any, Context.EVAL))
+        finally:
+            _EVAL_DATA.reset(token)
         if val is None:
             schema_names = data.collect_schema().names()
             if key in schema_names:
